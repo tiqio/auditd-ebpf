@@ -33,8 +33,8 @@
 
 ## Phase 2: Foundational（阻塞性共享基础）
 
-**Purpose**: 完成所有故事共享的 ABI、加载器、配置、风险接受/策略摘要基础、能力探测、队列、
-健康模型和特权测试框架。
+**Purpose**: 完成所有故事共享的 ABI、加载器、配置、主机身份、生命周期状态、风险接受/策略
+摘要基础、能力探测、队列、健康模型和特权测试框架。
 
 **⚠️ CRITICAL**: 本阶段未完成前不得开始用户故事实现。
 
@@ -42,22 +42,22 @@
 
 - [ ] T010 [P] 为 `KernelEventHeader`、syscall/exec 记录的大小、对齐、版本和越界添加失败布局测试于 `crates/auditd-ebpf-common/tests/abi_layout.rs`
 - [ ] T011 [P] 为未知 schema、非法长度、截断记录和非对齐字节添加失败解码测试于 `crates/auditd-ebpf/tests/event_decode.rs`
-- [ ] T012 [P] 为 CLI 优先级、容量范围、argv 全局/按 key 控制、风险接受 TOML schema/root 文件属性、策略摘要规范化、未知键和非法单位添加失败测试于 `crates/auditd-ebpf/tests/config_contract.rs`、`crates/auditd-ebpf/tests/risk_acceptance.rs`、`crates/auditd-ebpf/tests/policy_digest.rs`
+- [ ] T012 [P] 为 CLI 优先级、容量范围、`node_name`、生命周期文件路径、argv 全局/按 key 控制、风险接受 TOML schema/root 文件属性、策略摘要规范化、未知键和非法单位添加失败测试于 `crates/auditd-ebpf/tests/config_contract.rs`、`crates/auditd-ebpf/tests/risk_acceptance.rs`、`crates/auditd-ebpf/tests/policy_digest.rs`
 - [ ] T013 [P] 为 BTF、RingBuf、raw tracepoint、tracepoint 和 capability 探测结果添加 mock 测试于 `crates/auditd-ebpf/tests/capability_probe.rs`
-- [ ] T014 [P] 为自适应队列容量不变量和健康状态转换添加失败测试于 `crates/auditd-ebpf/tests/foundation_state.rs`
+- [ ] T014 [P] 为自适应队列容量不变量、HostIdentity 冻结语义、LifecycleMarker clean/dirty 转换和健康状态转换添加失败测试于 `crates/auditd-ebpf/tests/foundation_state.rs`、`crates/auditd-ebpf/tests/host_identity.rs`、`crates/auditd-ebpf/tests/lifecycle_state.rs`
 
 ### Shared Implementation
 
 - [ ] T015 实现 `#[repr(C)]` 固定宽度 ABI、schema 常量、记录类型和中文安全文档于 `crates/auditd-ebpf-common/src/event.rs`、`crates/auditd-ebpf-common/src/lib.rs`
 - [ ] T016 实现用户态记录长度校验、无未对齐引用的安全解码和错误类型于 `crates/auditd-ebpf/src/collector/decode.rs`、`crates/auditd-ebpf/src/collector/mod.rs`
-- [ ] T017 实现 TOML/环境变量/CLI 配置、argv 全局/按 key 输出策略、风险接受记录模型、64 KiB 上限、root/防符号链接文件读取和 version 1 固定顺序 SHA-256 摘要基础于 `crates/auditd-ebpf/src/config/model.rs`、`crates/auditd-ebpf/src/config/load.rs`、`crates/auditd-ebpf/src/policy/model.rs`、`crates/auditd-ebpf/src/policy/risk_acceptance.rs`、`crates/auditd-ebpf/src/policy/digest.rs`
+- [ ] T017 实现 TOML/环境变量/CLI 配置、`node_name`/生命周期路径、argv 全局/按 key 输出策略、风险接受记录模型、64 KiB 上限、root/防符号链接文件读取和 version 1 固定顺序 SHA-256 摘要基础于 `crates/auditd-ebpf/src/config/model.rs`、`crates/auditd-ebpf/src/config/load.rs`、`crates/auditd-ebpf/src/policy/model.rs`、`crates/auditd-ebpf/src/policy/risk_acceptance.rs`、`crates/auditd-ebpf/src/policy/digest.rs`
 - [ ] T018 实现 `run`、`check-rules`、`check-production`、`print-policy-digest`、`print-capabilities`、`benchmark-info` 命令与退出码骨架于 `crates/auditd-ebpf/src/cli.rs`、`crates/auditd-ebpf/src/commands/mod.rs`、`crates/auditd-ebpf/src/main.rs`
 - [ ] T019 实现内核版本、x86_64、BTF、BPF syscall、RingBuf、raw tracepoint、tracepoint 和 capabilities 探测于 `crates/auditd-ebpf/src/capabilities.rs`
 - [ ] T020 实现 eBPF map、每 CPU 基础计数器、活动 generation 和空程序骨架于 `crates/auditd-ebpf-ebpf/src/maps.rs`、`crates/auditd-ebpf-ebpf/src/programs/mod.rs`、`crates/auditd-ebpf-ebpf/src/main.rs`
 - [ ] T021 实现 Aya 对象加载、map 获取、程序 attach/link 生命周期和失败清理于 `crates/auditd-ebpf/src/loader.rs`
 - [ ] T022 实现按字节计量、硬上限和无界增长保护的 `AdaptiveQueue` 基础类型于 `crates/auditd-ebpf/src/output/adaptive_queue.rs`、`crates/auditd-ebpf/src/output/mod.rs`
-- [ ] T023 实现 `Starting/Healthy/Degraded/Unhealthy/Stopping` 状态机和单调计数模型于 `crates/auditd-ebpf/src/health/state.rs`、`crates/auditd-ebpf/src/health/counters.rs`、`crates/auditd-ebpf/src/health/mod.rs`
-- [ ] T024 实现 PID+启动时间身份、ABI 架构和有界进程缓存基础类型于 `crates/auditd-ebpf/src/process_cache/model.rs`、`crates/auditd-ebpf/src/process_cache/mod.rs`
+- [ ] T023 实现 `Starting/Healthy/Degraded/Unhealthy/Stopping` 状态机、`unclean_shutdown_detected_total` 和单调计数模型于 `crates/auditd-ebpf/src/health/state.rs`、`crates/auditd-ebpf/src/health/counters.rs`、`crates/auditd-ebpf/src/health/mod.rs`
+- [ ] T024 实现 PID+启动时间身份、TID 路径上下文、root/mount namespace/mount epoch 边界、ABI 架构和有界进程缓存基础类型于 `crates/auditd-ebpf/src/process_cache/model.rs`、`crates/auditd-ebpf/src/process_cache/mod.rs`
 - [ ] T025 创建 QEMU/真实内核特权测试驱动、镜像配置和清理检查于 `crates/xtask/src/commands/test_kernel.rs`、`tests/vm/kernels.toml`、`tests/privileged/smoke.sh`
 - [ ] T026 配置 5.15/6.1/6.6/6.12 特权自托管 CI job 和缺少 runner 时的明确跳过报告于 `.github/workflows/privileged.yml`
 - [ ] T027 运行共享 ABI、配置、能力、加载/卸载 smoke test 和全部 Foundational 门禁，并创建基础里程碑 commit，涉及 `crates/auditd-ebpf-common/`、`crates/auditd-ebpf/`、`crates/auditd-ebpf-ebpf/`、`tests/`
@@ -71,46 +71,47 @@
 **Goal**: 读取受支持 audit 规则子集，可靠采集 syscall、exec 和路径事件，执行 first-match 并暴露所有审计缺口。
 
 **Independent Test**: 使用兼容规则 corpus 启动内存事件 sink，在 5.15+ 特权环境执行确定性
-syscall、exec、绝对/相对/dirfd 路径操作；验证 exec 无论输出策略均采集 argv、按 first-match
-规则 key 决定 `Emitted/Suppressed`、覆盖 key 冲突拒绝整套候选规则；事件覆盖 100%、误报和
-未解释重复为 0，不支持规则逐行报错且重载失败保留旧版本。
+syscall、exec、绝对/相对/dirfd、mount namespace 和 chroot 路径操作；验证每条规则恰好一个
+非空 key，exec 无论输出策略均采集 argv、按 first-match 规则 key 决定 `Emitted/Suppressed`，
+覆盖 key 冲突拒绝整套候选规则；事件覆盖 100%、误报和未解释重复为 0，不支持规则逐行报错，
+路径边界不确定时产生 gap，且重载失败保留旧版本。
 
 ### Tests First
 
 - [ ] T028 [P] [US1] 为注释、空行、syscall form、legacy watch、CRLF 和多 `-S` 添加失败词法/语法测试于 `crates/auditd-ebpf-rules/tests/parser_supported.rs`
-- [ ] T029 [P] [US1] 为不支持选项、字段、action、list、路径、key 和冲突条件添加失败诊断 golden test 于 `crates/auditd-ebpf-rules/tests/parser_rejected.rs`、`tests/golden/rule-errors/`
+- [ ] T029 [P] [US1] 为不支持选项、字段、action、list、路径、空 key、缺失 key、重复 `-k`/`-F key=`、混用两种 key 和冲突条件添加失败诊断 golden test 于 `crates/auditd-ebpf-rules/tests/parser_rejected.rs`、`tests/golden/rule-errors/`
 - [ ] T030 [P] [US1] 为文件排序、root 所有权、group/other 可写和 fallback 文件添加失败 RuleSource 测试于 `crates/auditd-ebpf-rules/tests/rule_sources.rs`
-- [ ] T031 [P] [US1] 为规范化、first-match、perm 展开、规则 hash、argv 按 key 覆盖、仅覆盖 key 唯一约束和双 generation 编译添加失败测试于 `crates/auditd-ebpf-rules/tests/compile_rules.rs`、`crates/auditd-ebpf-rules/tests/argv_policy.rs`
+- [ ] T031 [P] [US1] 为每条 syscall/watch 规则恰好一个非空 key、规范化、first-match、perm 展开、规则 hash、argv 按 key 覆盖、仅覆盖 key 跨规则唯一约束和双 generation 编译添加失败测试于 `crates/auditd-ebpf-rules/tests/compile_rules.rs`、`crates/auditd-ebpf-rules/tests/argv_policy.rs`
 - [ ] T032 [P] [US1] 为 B64/B32 syscall 名称、数字和未知进程 ABI 候选行为添加失败测试于 `crates/auditd-ebpf-rules/tests/syscall_tables.rs`
 - [ ] T033 [P] [US1] 为 syscall、ExecAttempt、ExecResult、fork/exit 和每 CPU 丢失记录添加 ABI 契约测试于 `crates/auditd-ebpf-common/tests/kernel_records.rs`
 - [ ] T034 [P] [US1] 为 raw sys_enter/sys_exit 加载、粗筛选、返回值和 rule_version 添加特权失败测试于 `tests/privileged/syscall_capture.sh`
 - [ ] T035 [P] [US1] 为 exec 成功/失败、32 参数、参数截断、全局/规则级抑制时仍提交 argv、attempt/result 缺失和进程缓存不保留 argv 添加特权失败测试于 `tests/privileged/exec_capture.sh`
-- [ ] T036 [P] [US1] 为 fork、exec、exit、PID 复用和 B64/B32 继承添加特权失败测试于 `tests/privileged/process_lifecycle.sh`
-- [ ] T037 [P] [US1] 为 `/proc` bootstrap、cwd、dirfd、open/dup/close 和路径置信度添加失败单元测试于 `crates/auditd-ebpf/tests/process_cache.rs`、`crates/auditd-ebpf/tests/path_resolution.rs`
-- [ ] T038 [P] [US1] 为绝对、cwd 相对、dirfd 相对、rename/unlink 和无法解析 gap 添加特权失败测试于 `tests/privileged/path_rules.sh`
+- [ ] T036 [P] [US1] 为 fork、clone、exec、exit、PID/TID 复用、B64/B32 继承和线程路径上下文隔离添加特权失败测试于 `tests/privileged/process_lifecycle.sh`
+- [ ] T037 [P] [US1] 为 `/proc/<tid>/root`、`ns/mnt`、`mountinfo` bootstrap、cwd、dirfd、open/dup/close、全局 mount epoch 和路径置信度添加失败单元测试于 `crates/auditd-ebpf/tests/process_cache.rs`、`crates/auditd-ebpf/tests/path_resolution.rs`
+- [ ] T038 [P] [US1] 为绝对/cwd/dirfd 路径、rename/unlink、独立 mount namespace、bind/remount、chroot/pivot_root/setns/unshare 失效和无法解析 gap 添加特权失败测试于 `tests/privileged/path_rules.sh`、`tests/privileged/path_namespace.sh`
 - [ ] T039 [P] [US1] 为 SIGHUP 原子切换、并发事件版本和无效候选保留旧规则添加特权失败测试于 `tests/privileged/rule_reload.sh`
 - [ ] T040 [P] [US1] 为完整兼容 corpus、逐行拒绝和 `check-rules --print-normalized` 添加端到端失败测试于 `tests/integration/rule_compatibility.rs`、`tests/fixtures/rules/`
 
 ### Implementation
 
 - [ ] T041 [P] [US1] 实现带文件/行/列 span 的规则 lexer 和控制字符拒绝于 `crates/auditd-ebpf-rules/src/lexer.rs`
-- [ ] T042 [US1] 按 EBNF 实现 syscall/watch parser、字段操作符和重复项处理于 `crates/auditd-ebpf-rules/src/parser.rs`
+- [ ] T042 [US1] 按 EBNF 实现 syscall/watch parser、字段操作符和每条规则恰好一个非空 key 的缺失/重复拒绝于 `crates/auditd-ebpf-rules/src/parser.rs`
 - [ ] T043 [P] [US1] 实现稳定错误码、中文诊断和原始规则安全摘要于 `crates/auditd-ebpf-rules/src/diagnostic.rs`
-- [ ] T044 [US1] 实现 `RuleSource`、`AuditRule`、`RuleSet`、`argv_output=Inherit/Enabled/Disabled`、覆盖 key 唯一诊断、验证状态与 SHA-256 版本于 `crates/auditd-ebpf-rules/src/model.rs`、`crates/auditd-ebpf-rules/src/normalize.rs`
+- [ ] T044 [US1] 实现 `RuleSource`、必填单 key `AuditRule`、`RuleSet`、`argv_output=Inherit/Enabled/Disabled`、覆盖 key 跨规则唯一诊断、验证状态与 SHA-256 版本于 `crates/auditd-ebpf-rules/src/model.rs`、`crates/auditd-ebpf-rules/src/normalize.rs`
 - [ ] T045 [P] [US1] 实现 x86_64 B64/B32 syscall 表、perm 操作分类和版本化兼容矩阵于 `crates/auditd-ebpf-rules/src/syscalls/x86_64.rs`、`crates/auditd-ebpf-rules/src/permissions.rs`、`docs/rule-compatibility.md`
 - [ ] T046 [US1] 实现 `.rules` C-locale 字节排序、root/模式校验和单文件 fallback 于 `crates/auditd-ebpf-rules/src/source.rs`
 - [ ] T047 [US1] 实现粗 syscall/ABI/身份并集、任意 exec 规则即启用 argv 采集、双 generation map 数据和携带按 key argv 输出策略的 first-match 用户态计划于 `crates/auditd-ebpf-rules/src/compiler.rs`
 - [ ] T048 [US1] 实现 generation maps、syscall bitmap、进程 ABI 提示、inflight 上限和每 CPU 计数器于 `crates/auditd-ebpf-ebpf/src/maps.rs`
-- [ ] T049 [US1] 实现 raw sys_enter/sys_exit 粗筛选、参数/返回值采集和 RingBuf 提交于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`
+- [ ] T049 [US1] 实现 raw sys_enter/sys_exit 粗筛选、参数/返回值/路径参数采集、mount/umount2/move_mount/mount_setattr/chroot/pivot_root/setns/unshare 成功结果标记和 RingBuf 提交于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`
 - [ ] T050 [US1] 实现不受输出抑制策略影响、最多 32×192 字节 argv 的 ExecAttempt、成功/失败 ExecResult、`exec_argv_captured_total` 和中文 verifier 安全注释于 `crates/auditd-ebpf-ebpf/src/programs/exec.rs`、`crates/auditd-ebpf-ebpf/src/maps.rs`
 - [ ] T051 [P] [US1] 实现 sched fork/exec/exit 事件和进程 ABI 继承提示于 `crates/auditd-ebpf-ebpf/src/programs/process.rs`
 - [ ] T052 [US1] 实现 RingBuf drain、记录解码、含 argv 的 attempt/result 有界关联、匹配后及时释放参数、超时 gap 和内存 sink 于 `crates/auditd-ebpf/src/collector/runtime.rs`、`crates/auditd-ebpf/src/collector/exec_pending.rs`
-- [ ] T053 [US1] 实现 `/proc` bootstrap、PID 启动时间、ELF class、fork/exec/exit 状态更新且禁止把 argv 写入进程缓存于 `crates/auditd-ebpf/src/process_cache/bootstrap.rs`、`crates/auditd-ebpf/src/process_cache/lifecycle.rs`
-- [ ] T054 [US1] 实现 cwd/fd 缓存、open/dup/close/chdir/fchdir 更新、路径规范化和 gap 生成于 `crates/auditd-ebpf/src/process_cache/fd_table.rs`、`crates/auditd-ebpf/src/process_cache/path.rs`
-- [ ] T055 [US1] 实现 arch/uid/gid/success/path/dir/perm 精确求值、first-match、全局/唯一 key argv 输出决策和 `ResolvedAuditEvent.argv_output` 于 `crates/auditd-ebpf/src/rules/engine.rs`、`crates/auditd-ebpf/src/rules/argv_policy.rs`、`crates/auditd-ebpf/src/rules/mod.rs`
+- [ ] T053 [US1] 实现 `/proc/*/task/*` bootstrap、PID/TID 启动身份、线程 root、mount namespace `(st_dev,st_ino)`、mountinfo、ELF class、fork/exec/exit 状态更新且禁止把 argv 写入进程缓存于 `crates/auditd-ebpf/src/process_cache/bootstrap.rs`、`crates/auditd-ebpf/src/process_cache/lifecycle.rs`
+- [ ] T054 [US1] 实现线程 cwd/fd 缓存、open/dup/close/chdir/fchdir 更新、mount/root/namespace 成功变化触发全局 epoch 递增与保守失效、namespace 内词法路径规范化和 gap 生成于 `crates/auditd-ebpf/src/process_cache/fd_table.rs`、`crates/auditd-ebpf/src/process_cache/path.rs`、`crates/auditd-ebpf/src/process_cache/mounts.rs`
+- [ ] T055 [US1] 实现 arch/uid/gid/success/path/dir/perm 精确求值、process root+mount namespace 路径字符串语义、first-match、全局/唯一 key argv 输出决策和 `ResolvedAuditEvent.argv_output`，并明确不声明 symlink/inode/hard-link 等价于 `crates/auditd-ebpf/src/rules/engine.rs`、`crates/auditd-ebpf/src/rules/argv_policy.rs`、`crates/auditd-ebpf/src/rules/mod.rs`
 - [ ] T056 [US1] 实现 inactive generation staging、原子切换、失败回滚和 SIGHUP reload service 于 `crates/auditd-ebpf/src/reload.rs`
 - [ ] T057 [US1] 完成 `check-rules`、规范化输出、rule_version 状态和兼容矩阵生成于 `crates/auditd-ebpf/src/commands/check_rules.rs`、`crates/auditd-ebpf/src/commands/mod.rs`、`docs/rule-compatibility.md`
-- [ ] T058 [US1] 运行 parser/ABI/5.15+ 特权采集/路径/reload 及 US1 quickstart 验证，并创建采集 MVP 里程碑 commit，涉及 `crates/auditd-ebpf-rules/`、`crates/auditd-ebpf-ebpf/`、`crates/auditd-ebpf/src/collector/`、`crates/auditd-ebpf/src/process_cache/`
+- [ ] T058 [US1] 运行 parser/单 key/ABI/5.15+ 特权采集/mount namespace/chroot/路径 gap/reload 及 US1 quickstart 验证，并创建采集 MVP 里程碑 commit，涉及 `crates/auditd-ebpf-rules/`、`crates/auditd-ebpf-ebpf/`、`crates/auditd-ebpf/src/collector/`、`crates/auditd-ebpf/src/process_cache/`
 
 **Checkpoint**: US1 可通过内存 sink 独立证明规则兼容、采集正确性、路径缺口可见和原子重载。
 
@@ -122,34 +123,37 @@ syscall、exec、绝对/相对/dirfd 路径操作；验证 exec 无论输出策�
 在用户态严格抑制关闭的 argv，同时以风险接受策略摘要、访问控制和加密门禁证明生产就绪。
 
 **Independent Test**: 触发 emitted/suppressed 两类唯一 key exec 事件后 10 秒内从 journal 和
-rsyslog 检索相同 `event_id`；suppressed 事件显示 `argv_output=suppressed` 且所有日志无参数内容，
-`argv_captured/argv_suppressed` 计数增加。生产检查验证 root 可信 TOML、无固定到期、当前策略摘要、
-journal/文件权限、认证加密和逐目的地保留期；暂停下游时业务不阻塞且缺口可见。
+rsyslog 检索相同 `event_id`；验证同一进程 `host`/`machine_id` 稳定、配置 node name 生效、
+rsyslog 逐字节保留策略后源记录，suppressed 事件显示 `argv_output=suppressed` 且所有日志无参数
+内容，`argv_captured/argv_suppressed` 计数增加。SIGKILL 后重启必须在 10 秒内产生
+`unclean_shutdown count=?` gap 并进入 degraded；优雅停止必须留下 clean。生产检查验证 root
+可信 TOML、无固定到期、当前策略摘要、journal/文件权限、认证加密和逐目的地保留期；暂停下游
+时业务不阻塞且缺口可见。
 
 ### Tests First
 
-- [ ] T059 [P] [US2] 为固定字段顺序、`argv_output=emitted|suppressed`、suppressed 无 `aN`、`AUDITD_EBPF`、gap、diag 和 status 添加 golden contract test 于 `crates/auditd-ebpf/tests/event_format_golden.rs`、`tests/golden/events/`
+- [ ] T059 [P] [US2] 为固定字段顺序、`host`/`machine_id`、`argv_output=emitted|suppressed`、suppressed 无 `aN`、`AUDITD_EBPF`、`unclean_shutdown count=?` gap、diag 和 status 添加 golden contract test 于 `crates/auditd-ebpf/tests/event_format_golden.rs`、`tests/golden/events/`
 - [ ] T060 [P] [US2] 为引号、反斜杠、CR/LF/NUL、非 UTF-8 和 16 KiB 上限添加属性测试于 `crates/auditd-ebpf/tests/event_escape.rs`
 - [ ] T061 [P] [US2] 为 emitted argv 原样输出、suppressed argv 不进入 stdout/stderr/gap/status/输出队列、审计 stdout、诊断/status stderr 和永久 EPIPE 退出码添加进程集成测试于 `tests/integration/output_streams.rs`、`crates/auditd-ebpf/tests/argv_suppression.rs`
 - [ ] T062 [P] [US2] 为 64 MiB 起始、80% 高水位、512 MiB 硬上限、缩容和 drop-new 添加失败测试于 `crates/auditd-ebpf/tests/adaptive_queue.rs`
-- [ ] T063 [P] [US2] 为计数不变量、`exec_argv_suppressed_total <= exec_argv_captured_total`、degraded 恢复窗口、生产策略状态、unhealthy 和 final 状态添加失败测试于 `crates/auditd-ebpf/tests/health_contract.rs`
-- [ ] T064 [P] [US2] 为 SIGUSR1、SIGTERM 排空、超时退出码 8 和信号重入添加集成测试于 `tests/integration/signals.rs`
-- [ ] T065 [P] [US2] 为 root 可信风险 TOML、未知版本/键、缺字段、符号链接/TOCTOU、策略摘要稳定性/不匹配、无时间到期、journal 获准组和 systemd capability 边界添加特权测试于 `tests/privileged/production_policy.sh`、`tests/privileged/systemd_journal.sh`
-- [ ] T066 [P] [US2] 为 rsyslog imjournal 游标、事件/状态分流、本地 `0640`/导出 `0600`、认证 TLS 服务端身份、逐目的地保留、断网队列和恢复添加特权测试于 `tests/privileged/rsyslog_pipeline.sh`、`tests/fixtures/rsyslog/`
+- [ ] T063 [P] [US2] 为计数不变量、`exec_argv_suppressed_total <= exec_argv_captured_total`、`unclean_shutdown_detected_total`、degraded 恢复窗口、生产策略状态、unhealthy 和 final 状态添加失败测试于 `crates/auditd-ebpf/tests/health_contract.rs`
+- [ ] T064 [P] [US2] 为 SIGUSR1、SIGTERM 排空、超时退出码 8、信号重入、优雅 clean、SIGKILL 保留 dirty 和重启 10 秒内 unknown-count gap 添加集成测试于 `tests/integration/signals.rs`、`tests/privileged/lifecycle_restart.sh`
+- [ ] T065 [P] [US2] 为 root 可信风险 TOML、生命周期 TOML `0600`/普通文件/可信父目录、未知版本/键、缺字段、符号链接/TOCTOU、策略摘要稳定性/不匹配、无时间到期、journal 获准组和 systemd capability 边界添加特权测试于 `tests/privileged/production_policy.sh`、`tests/privileged/lifecycle_state.sh`、`tests/privileged/systemd_journal.sh`
+- [ ] T066 [P] [US2] 为 rsyslog imjournal 游标、策略后 stdout 行逐字节一致、suppressed 无 `aN`、事件/状态分流、本地 `0640`/导出 `0600`、认证 TLS 服务端身份、逐目的地保留、断网队列和恢复添加特权测试于 `tests/privileged/rsyslog_pipeline.sh`、`tests/fixtures/rsyslog/`
 
 ### Implementation
 
-- [ ] T067 [US2] 实现固定字段顺序、audit msg、可逆字节转义、`argv_output`、suppressed 时省略全部 `aN`、argv 截断和 16 KiB 上限于 `crates/auditd-ebpf/src/output/event_formatter.rs`
-- [ ] T068 [P] [US2] 实现绝不包含 argv 内容的 `AUDITD_EBPF_GAP`/`DIAG`/`STATUS` 格式器及 argv captured/suppressed 状态字段于 `crates/auditd-ebpf/src/output/status_formatter.rs`
+- [ ] T067 [US2] 实现启动时冻结配置 node name/hostname、应用专用 HMAC-SHA256 machine-id 摘要或未知诊断、固定字段顺序、audit msg、可逆字节转义、`argv_output`、suppressed 时省略全部 `aN`、argv 截断和 16 KiB 上限于 `crates/auditd-ebpf/src/identity.rs`、`crates/auditd-ebpf/src/output/event_formatter.rs`
+- [ ] T068 [P] [US2] 实现绝不包含 argv 内容、携带稳定 host/machine_id、允许仅 `unclean_shutdown` 使用 `count=?` 的 `AUDITD_EBPF_GAP`/`DIAG`/`STATUS` 格式器及 argv captured/suppressed 状态字段于 `crates/auditd-ebpf/src/output/status_formatter.rs`
 - [ ] T069 [US2] 实现在 AdaptiveQueue 入队前移除 suppressed argv、collector→队列→stdout writer、按字节动态增长、硬上限 drop-new 和 flush 错误处理于 `crates/auditd-ebpf/src/output/writer.rs`、`crates/auditd-ebpf/src/output/adaptive_queue.rs`
-- [ ] T070 [US2] 实现 eBPF 每 CPU 计数聚合、`exec_argv_captured/suppressed` 不变量、生产策略状态、状态变化即时记录、10 秒周期记录和 5 分钟恢复窗口于 `crates/auditd-ebpf/src/health/reporter.rs`、`crates/auditd-ebpf/src/health/counters.rs`
-- [ ] T071 [US2] 实现启动顺序、ready、信号优先级、停止排空、link 清理和最终状态于 `crates/auditd-ebpf/src/runtime.rs`
+- [ ] T070 [US2] 实现 eBPF 每 CPU 计数聚合、`exec_argv_captured/suppressed` 不变量、`unclean_shutdown_detected_total`、生产策略状态、状态变化即时记录、10 秒周期/异常关闭告警和 5 分钟恢复窗口于 `crates/auditd-ebpf/src/health/reporter.rs`、`crates/auditd-ebpf/src/health/counters.rs`
+- [ ] T071 [US2] 实现 root 可信 lifecycle TOML 的同目录临时文件+同步+原子 rename+目录同步、attach/接收前 durable dirty、历史 dirty 的首个 `unclean_shutdown count=?` gap、停止排空/最终计数/link-map 清理后 durable clean 和完整启动/信号顺序于 `crates/auditd-ebpf/src/lifecycle/state_file.rs`、`crates/auditd-ebpf/src/runtime.rs`
 - [ ] T072 [US2] 实现有效策略 version 1 摘要、`print-policy-digest`、风险 TOML 与实际读取者/目的地/访问模式/TLS 身份/保留期双重校验，并将 production fail-closed 门禁组装进 `run`/`check-production` 于 `crates/auditd-ebpf/src/policy/digest.rs`、`crates/auditd-ebpf/src/policy/validate.rs`、`crates/auditd-ebpf/src/commands/print_policy_digest.rs`、`crates/auditd-ebpf/src/commands/check_production.rs`、`crates/auditd-ebpf/src/commands/run.rs`
-- [ ] T073 [P] [US2] 编写最小 capability、只读文件系统、风险记录只读路径、journal 输出、获准审计组和 reload 的 hardened unit 于 `packaging/systemd/auditd-ebpf.service`
-- [ ] T074 [P] [US2] 编写 imjournal 持久游标、事件/运维分流、本地 `0640`、认证 TLS `x509/name`、磁盘辅助队列、保留和限速配置于 `packaging/rsyslog/60-auditd-ebpf.conf`
-- [ ] T075 [P] [US2] 编写中文配置参考、argv 默认原样与用户态抑制、唯一 key 覆盖、风险 TOML 审批/无固定到期/策略摘要、systemd/journal 权限、rsyslog 认证加密和保留期于 `docs/configuration.md`、`docs/operations.md`
-- [ ] T076 [US2] 按 quickstart 执行 emitted/suppressed argv、`print-policy-digest`、production policy、journalctl、rsyslog、backpressure、reload 和 shutdown 端到端测试于 `tests/integration/logging_end_to_end.sh`、`crates/xtask/src/commands/test_kernel.rs`
-- [ ] T077 [US2] 运行格式/属性/argv 泄露负例/风险摘要/信号/systemd/rsyslog/背压和 US2 quickstart 门禁，并创建日志集成里程碑 commit，涉及 `crates/auditd-ebpf/src/output/`、`crates/auditd-ebpf/src/policy/`、`crates/auditd-ebpf/src/health/`、`packaging/`
+- [ ] T073 [P] [US2] 编写最小 capability、只读文件系统、风险记录只读路径、仅 `/var/lib/auditd-ebpf` 生命周期目录可写、journal 输出、获准审计组和 reload 的 hardened unit 于 `packaging/systemd/auditd-ebpf.service`
+- [ ] T074 [P] [US2] 编写 imjournal 持久游标、策略后源记录逐字节保留、事件/运维分流、本地 `0640`、认证 TLS `x509/name`、磁盘辅助队列、保留和限速配置于 `packaging/rsyslog/60-auditd-ebpf.conf`
+- [ ] T075 [P] [US2] 编写中文配置参考、稳定 host/machine_id、argv 默认原样与用户态抑制、唯一 key 覆盖、clean/dirty 风险边界、风险 TOML 审批/无固定到期/策略摘要、systemd/journal 权限、rsyslog 原样记录/认证加密和保留期于 `docs/configuration.md`、`docs/operations.md`
+- [ ] T076 [US2] 按 quickstart 执行 host/machine_id 稳定性、emitted/suppressed argv、`print-policy-digest`、production policy、journalctl/rsyslog 10 秒检索与逐字节比较、backpressure、reload、SIGKILL dirty 重启 gap 和优雅 clean 端到端测试于 `tests/integration/logging_end_to_end.sh`、`crates/xtask/src/commands/test_kernel.rs`
+- [ ] T077 [US2] 运行身份/格式/属性/argv 泄露负例/生命周期/风险摘要/信号/systemd/rsyslog/背压和 US2 quickstart 门禁，并创建日志集成里程碑 commit，涉及 `crates/auditd-ebpf/src/identity.rs`、`crates/auditd-ebpf/src/lifecycle/`、`crates/auditd-ebpf/src/output/`、`crates/auditd-ebpf/src/policy/`、`crates/auditd-ebpf/src/health/`、`packaging/`
 
 **Checkpoint**: US2 可独立证明 emitted argv 原样进入受控日志、suppressed argv 仍被内核采集但
 不泄露到任何日志，并以匹配当前策略摘要的风险记录和实际访问/TLS/保留检查通过生产门禁。
@@ -203,11 +207,11 @@ journal/文件权限、认证加密和逐目的地保留期；暂停下游时业
 - [ ] T101 [P] 审核公共 API、ABI 字段、复杂算法、兼容处理和错误路径的中文文档与注释于 `crates/auditd-ebpf-common/src/`、`crates/auditd-ebpf/src/`、`crates/auditd-ebpf-ebpf/src/`、`crates/auditd-ebpf-rules/src/`
 - [ ] T102 [P] 审核所有 unsafe、用户/内核指针读取、循环上界、栈/map 容量和 verifier 日志并记录结论于 `docs/security-review.md`
 - [ ] T103 [P] 运行 cargo-deny、依赖许可证、安全公告和上游来源审计并固定结果于 `deny.toml`、`docs/dependency-audit.md`
-- [ ] T104 [P] 验证并收紧 systemd capabilities、NoNewPrivileges、ProtectSystem、可写路径、规则/风险文件可信属性、journal 获准组、本地日志 `0640`、导出 `0600`、rsyslog 目的地、认证 TLS、逐目的地保留和策略摘要门禁于 `packaging/systemd/auditd-ebpf.service`、`tests/privileged/systemd_sandbox.sh`
-- [ ] T105 在 5.15/6.1/6.6/6.12 x86_64 执行加载、规则、事件、丢失、reload 和清理矩阵并保存结果于 `tests/vm/results/kernel-matrix.md`
+- [ ] T104 [P] 验证并收紧 systemd capabilities、NoNewPrivileges、ProtectSystem、生命周期唯一可写目录、规则/风险/生命周期文件可信属性、journal 获准组、本地日志 `0640`、导出 `0600`、rsyslog 目的地、认证 TLS、逐目的地保留和策略摘要门禁于 `packaging/systemd/auditd-ebpf.service`、`tests/privileged/systemd_sandbox.sh`
+- [ ] T105 在 5.15/6.1/6.6/6.12 x86_64 执行加载、必填 key、host/machine_id、mount namespace/chroot 路径、事件、丢失、dirty 重启、reload 和清理矩阵并保存结果于 `tests/vm/results/kernel-matrix.md`
 - [ ] T106 [P] 添加规则 lexer/parser fuzz target、恶意路径/argv corpus 和资源上限回归于 `fuzz/Cargo.toml`、`fuzz/fuzz_targets/rule_parser.rs`、`fuzz/corpus/rule_parser/`
 - [ ] T107 执行 24 小时稳定性、内存增长、计数不变量和无遗留 link/map 测试并保存结果于 `tests/stability/run-24h.sh`、`tests/stability/report.md`
-- [ ] T108 [P] 注入 RingBuf 满、用户队列满、stdout 关闭、journald 限速、rsyslog 断网和磁盘满故障于 `tests/failure-injection/run.sh`、`tests/failure-injection/report.md`
+- [ ] T108 [P] 注入 RingBuf 满、用户队列满、stdout 关闭、SIGKILL dirty、生命周期原子写失败、journald 限速、rsyslog 断网和磁盘满故障于 `tests/failure-injection/run.sh`、`tests/failure-injection/report.md`
 - [ ] T109 完整执行 `specs/001-auditd-ebpf-replacement/quickstart.md` 并记录每步命令、结果和偏差于 `docs/quickstart-validation.md`
 - [ ] T110 [P] 实现安装、升级、卸载、auditd 冲突保护和配置保留脚本于 `packaging/install.sh`、`packaging/uninstall.sh`、`packaging/upgrade.sh`
 - [ ] T111 核对 FR-001–FR-016、SR-001–SR-003a、SR-004–SR-007、SC-001–SC-009 与测试证据的最终追踪矩阵于 `docs/requirements-traceability.md`
@@ -222,9 +226,11 @@ journal/文件权限、认证加密和逐目的地保留期；暂停下游时业
 
 - **Setup (Phase 1)**: 无依赖，T001 → T002–T008 → T009。
 - **Foundational (Phase 2)**: 依赖 T009；T010–T014 必须先失败，再完成 T015–T026，最后 T027；
-  其中 T017/T018 固定风险记录与策略摘要接口，US1/US2 只填充有效规则和日志链路数据。
+  其中 T017/T018/T023/T024 固定配置、主机/生命周期、健康与路径边界接口，US1/US2 填充规则、
+  内核事件和日志链路行为。
 - **US1 (Phase 3)**: 依赖 T027；是可交付 MVP，并阻塞生产日志和性能对照。
-- **US2 (Phase 4)**: 依赖 T058 提供 `ResolvedAuditEvent.argv_output`、collector、唯一 key 策略和规则生命周期。
+- **US2 (Phase 4)**: 依赖 T058 提供 `ResolvedAuditEvent.argv_output`、collector、必填 key、
+  namespace 路径语义和规则生命周期；T071 的 durable dirty 必须早于任何 attach/事件接收。
 - **US3 (Phase 5)**: capture-only 依赖 T058；operational 与最终报告依赖 T077，因此按整体阶段在 US2 后执行。
 - **Polish (Phase 6)**: 依赖 T100；T101–T112 可按标记并行，T113 最后执行。
 
@@ -240,6 +246,10 @@ Setup → Foundational → US1 (MVP) → US2 → US3 → Polish/Release
 - 所有 `Tests First` 任务必须先提交失败证据，再执行实现任务。
 - 模型/解析器/ABI 在服务编排之前；内核采集在精确规则与输出之前。
 - argv 抑制只能在用户态 first-match 后、输出队列入队前执行；不得改成内核停止采集。
+- path/dir 只能声明 process root + mount namespace 内的路径字符串语义；mount epoch 失效后未能
+  可靠重建必须 gap，不得伪造 inode/symlink/hard-link 等价。
+- 生命周期必须先 durable dirty 再 attach，且只有排空、最终计数和 link/map 清理后才能 clean；
+  历史 dirty 只能报告 `unclean_shutdown count=?`，不得猜测精确损失。
 - 风险审批无固定到期，但每次 production 启动必须重算摘要并复核实际日志链路。
 - 契约测试必须在端到端测试之前通过。
 - 每个 checkpoint 的全部门禁通过后才允许创建对应 Git commit。
@@ -281,14 +291,14 @@ Setup → Foundational → US1 (MVP) → US2 → US3 → Polish/Release
 ### MVP First
 
 1. 完成 Setup 和 Foundational。
-2. 完成 US1 到 T058，使用内存 sink 验证规则兼容、事件正确性和重载。
-3. **STOP AND VALIDATE**：在 5.15+ 内核独立演示规则加载、exec/path 事件和 gap 可见性。
+2. 完成 US1 到 T058，使用内存 sink 验证必填 key、规则兼容、事件正确性、namespace 路径和重载。
+3. **STOP AND VALIDATE**：在 5.15+ 内核独立演示规则加载、exec/path 事件、mount/chroot 失效和 gap 可见性。
 
 ### Incremental Delivery
 
 1. **MVP**: US1 提供可信采集和规则兼容。
-2. **Operational**: US2 提供 stdout、journal、rsyslog、argv 用户态抑制、生产策略摘要门禁、
-   背压和健康状态。
+2. **Operational**: US2 提供稳定 host/machine_id、stdout、journal、rsyslog 原样记录、argv
+   用户态抑制、clean/dirty 异常关闭证据、生产策略摘要门禁、背压和健康状态。
 3. **Evidence**: US3 提供 auditd 公平对照和可复现性能报告。
 4. **Release**: Polish 完成内核矩阵、安全、24 小时稳定性和打包。
 
