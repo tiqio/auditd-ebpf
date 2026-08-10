@@ -1,0 +1,18 @@
+[package]
+name = "auditd-ebpf-ebpf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "auditd-ebpf-ebpf"
+path = "src/main.rs"
+
+[dependencies]
+auditd-ebpf-common = { path = "../auditd-ebpf-common" }
+
+[target.'cfg(target_arch = "bpf")'.dependencies]
+aya-ebpf = "0.2.1"
+aya-log-ebpf = "0.2.0"
+

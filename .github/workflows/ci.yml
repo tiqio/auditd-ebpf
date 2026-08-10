@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt,clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets --all-features --exclude auditd-ebpf-ebpf -- -D warnings
+      - run: cargo test --workspace --exclude auditd-ebpf-ebpf
+      - run: cargo build -p auditd-ebpf-ebpf
+

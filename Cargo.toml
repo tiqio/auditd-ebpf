@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/auditd-ebpf",
+    "crates/auditd-ebpf-common",
+    "crates/auditd-ebpf-ebpf",
+    "crates/auditd-ebpf-rules",
+    "crates/auditd-ebpf-bench",
+    "crates/xtask",
+]
+default-members = [
+    "crates/auditd-ebpf",
+    "crates/auditd-ebpf-common",
+    "crates/auditd-ebpf-rules",
+    "crates/auditd-ebpf-bench",
+    "crates/xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "Apache-2.0"
+repository = "https://github.com/tiqio/auditd-ebpf"
+
+[workspace.dependencies]
+anyhow = "1.0.99"
+aya = "0.14.0"
+aya-log = "0.3.0"
+clap = { version = "4.5.45", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0.15"
+tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread", "signal"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
+
+[profile.dev]
+panic = "abort"
+

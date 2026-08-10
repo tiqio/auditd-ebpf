@@ -19,15 +19,15 @@
 
 **Purpose**: 建立可复现的 Rust/Aya workspace、构建命令和基础 CI。
 
-- [ ] T001 创建 workspace、release profile、Rust 1.97.1 与 eBPF nightly 固定配置于 `Cargo.toml`、`rust-toolchain.toml`、`rust-toolchain-ebpf.toml`
-- [ ] T002 [P] 创建六个 crate 清单并锁定 Aya 0.14、aya-ebpf 0.2.1、aya-log 0.3.0、aya-log-ebpf 0.2.0 与 bpf-linker 0.10.4 于 `crates/auditd-ebpf/Cargo.toml`、`crates/auditd-ebpf-common/Cargo.toml`、`crates/auditd-ebpf-ebpf/Cargo.toml`、`crates/auditd-ebpf-rules/Cargo.toml`、`crates/auditd-ebpf-bench/Cargo.toml`、`crates/xtask/Cargo.toml`
-- [ ] T003 [P] 配置 workspace rustfmt、严格 Clippy、cargo-deny 和依赖许可证策略于 `rustfmt.toml`、`clippy.toml`、`deny.toml`
-- [ ] T004 实现 `build-ebpf`、`build`、`test-kernel` 命令骨架和中文帮助于 `crates/xtask/src/main.rs`、`crates/xtask/src/commands/mod.rs`
-- [ ] T005 [P] 创建用户态、共享 ABI、eBPF、规则和基准模块骨架于 `crates/auditd-ebpf/src/main.rs`、`crates/auditd-ebpf-common/src/lib.rs`、`crates/auditd-ebpf-ebpf/src/main.rs`、`crates/auditd-ebpf-rules/src/lib.rs`、`crates/auditd-ebpf-bench/src/main.rs`
-- [ ] T006 [P] 创建测试、fixture、benchmark、packaging 目录说明和占位清单于 `tests/README.md`、`tests/fixtures/rules/README.md`、`benchmarks/README.md`、`packaging/README.md`
-- [ ] T007 配置无特权格式、Clippy、单元测试和 eBPF 构建 CI 于 `.github/workflows/ci.yml`
-- [ ] T008 编写中文项目入口、构建前提、特权测试说明和安全警告于 `README.md`
-- [ ] T009 运行 `cargo fmt --check`、严格 Clippy、workspace 测试和 eBPF 构建，并创建 Setup 里程碑 commit，涉及 `Cargo.toml`、`crates/`、`.github/workflows/ci.yml`
+- [X] T001 创建 workspace、release profile、Rust 1.97.1 与 eBPF nightly 固定配置于 `Cargo.toml`、`rust-toolchain.toml`、`rust-toolchain-ebpf.toml`
+- [X] T002 [P] 创建六个 crate 清单并锁定 Aya 0.14、aya-ebpf 0.2.1、aya-log 0.3.0、aya-log-ebpf 0.2.0 与 bpf-linker 0.10.4 于 `crates/auditd-ebpf/Cargo.toml`、`crates/auditd-ebpf-common/Cargo.toml`、`crates/auditd-ebpf-ebpf/Cargo.toml`、`crates/auditd-ebpf-rules/Cargo.toml`、`crates/auditd-ebpf-bench/Cargo.toml`、`crates/xtask/Cargo.toml`
+- [X] T003 [P] 配置 workspace rustfmt、严格 Clippy、cargo-deny 和依赖许可证策略于 `rustfmt.toml`、`clippy.toml`、`deny.toml`
+- [X] T004 实现 `build-ebpf`、`build`、`test-kernel` 命令骨架和中文帮助于 `crates/xtask/src/main.rs`、`crates/xtask/src/commands/mod.rs`
+- [X] T005 [P] 创建用户态、共享 ABI、eBPF、规则和基准模块骨架于 `crates/auditd-ebpf/src/main.rs`、`crates/auditd-ebpf-common/src/lib.rs`、`crates/auditd-ebpf-ebpf/src/main.rs`、`crates/auditd-ebpf-rules/src/lib.rs`、`crates/auditd-ebpf-bench/src/main.rs`
+- [X] T006 [P] 创建测试、fixture、benchmark、packaging 目录说明和占位清单于 `tests/README.md`、`tests/fixtures/rules/README.md`、`benchmarks/README.md`、`packaging/README.md`
+- [X] T007 配置无特权格式、Clippy、单元测试和 eBPF 构建 CI 于 `.github/workflows/ci.yml`
+- [X] T008 编写中文项目入口、构建前提、特权测试说明和安全警告于 `README.md`
+- [X] T009 运行 `cargo fmt --check`、严格 Clippy、workspace 测试和 eBPF 构建，并创建 Setup 里程碑 commit，涉及 `Cargo.toml`、`crates/`、`.github/workflows/ci.yml`
 
 ---
 

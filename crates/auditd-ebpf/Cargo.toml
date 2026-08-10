@@ -1,0 +1,20 @@
+[package]
+name = "auditd-ebpf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "auditd-ebpf"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+auditd-ebpf-common = { path = "../auditd-ebpf-common", features = ["user"] }
+auditd-ebpf-rules = { path = "../auditd-ebpf-rules" }
+aya.workspace = true
+aya-log.workspace = true
+clap.workspace = true
+tokio.workspace = true
+
