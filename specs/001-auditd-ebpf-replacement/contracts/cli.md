@@ -13,6 +13,8 @@ auditd-ebpf run \
   [--ring-buffer-bytes 16777216] \
   [--queue-initial-bytes 67108864] \
   [--queue-max-bytes 536870912] \
+  [--node-name NODE] \
+  [--lifecycle-state-file /var/lib/auditd-ebpf/lifecycle.toml] \
   [--deployment-mode non-production|production] \
   [--risk-acceptance-file /etc/auditd-ebpf/risk-acceptance.toml] \
   [--emit-argv | --no-emit-argv] \
@@ -27,6 +29,17 @@ auditd-ebpf run \
 2. 否则读取 `--rules-dir` 中后缀 `.rules` 的普通文件。
 3. 目录不存在或没有可用文件时回退 `/etc/audit/audit.rules`。
 4. 两者均不可用时启动失败。
+
+节点身份与生命周期：
+
+- `--node-name` 非空时作为全部 audit/gap 记录的 `host`；未提供时在启动阶段读取一次 hostname，
+  后续主机名变化不影响当前进程。
+- `machine_id` 从规范化 `/etc/machine-id` 使用应用专用 HMAC-SHA256 派生并截断为 128 bits；
+  原值不输出，读取或派生失败时记录可操作诊断并稳定输出 `machine_id=?`，不得伪造随机标识。
+- `--lifecycle-state-file` 必须是 root 所有、`0600`、非符号链接的普通文件，父目录不可被
+  非 root 写入。服务在 attach/接收事件前持久写 dirty，完整优雅清理后才写 clean。
+- 启动发现 dirty 时，必须在 10 秒内输出 `reason=unclean_shutdown count=?` gap 并进入 degraded；
+  不尝试持久化或重放历史审计事件。
 
 argv 与生产策略：
 

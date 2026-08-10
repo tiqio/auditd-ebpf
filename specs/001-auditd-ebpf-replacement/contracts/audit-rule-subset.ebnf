@@ -70,6 +70,9 @@ end_of_file    = ? physical end of input ? ;
 (* 6. 同一字段重复且条件冲突时规则无效。 *)
 (* 7. 不支持的选项、字段、action、list 或操作符导致整个候选规则集拒绝。 *)
 (* 8. 文件按 C locale 文件名字节序排序，规则按出现顺序执行 first-match。 *)
+(* 9. 每条 syscall_rule 和 watch_rule 必须且只能包含一个非空 key。 *)
+(* 10. syscall_rule 缺失 key、重复 -k、重复 -F key= 或混用两种 key 表达均无效。 *)
+(* 11. watch_rule 的语法已强制恰好一个 key；空 key 或额外 key term 仍按语义错误拒绝。 *)
 
 (* 明确不支持 *)
 (* -A、-D、-d、-e、-f、-r、-b、-c、-C、-q、-t、-l、-R、-W、-i *)

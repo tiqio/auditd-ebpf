@@ -1,6 +1,7 @@
 # Implementation Plan: auditd-ebpf 替代与性能验证
 
-**Branch**: `001-auditd-ebpf-replacement` | **Date**: 2026-08-10 | **Spec**: [spec.md](spec.md)
+**Branch**: `main` | **Feature Directory**: `001-auditd-ebpf-replacement` | **Date**: 2026-08-10 |
+**Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/001-auditd-ebpf-replacement/spec.md`
 
@@ -11,7 +12,8 @@
 进程执行和路径参数，使用版本化共享 ABI 写入 RingBuf。用户态完成路径规范化、精确规则匹配、
 按唯一规则 key 应用 argv 输出策略、`key=value` 单行格式化、stdout 输出、健康状态和动态
 有界队列管理。生产模式使用 root 可信 TOML 风险接受记录和版本化策略摘要验证实际日志链路。
-项目同时提供与传统
+事件携带冻结节点名和应用专用 machine-id；线程路径上下文按 mount namespace 与全局 mount
+epoch 保守失效。持久 clean/dirty 标记在异常终止后的首次启动生成未知数量 gap。项目同时提供与传统
 auditd 的正确性优先、同机重复对照基准，只有满足规格阈值时才发布性能提升结论。
 
 ## Technical Context
@@ -20,12 +22,13 @@ auditd 的正确性优先、同机重复对照基准，只有满足规格阈值�
 `nightly-2026-08-06`、`rust-src` 和 `bpfel-unknown-none`
 
 **Primary Dependencies**: Aya 0.14、aya-ebpf 0.2.1、aya-log 0.3.0、aya-log-ebpf 0.2.0、
-bpf-linker 0.10.4、clap 4、tracing 0.1、tracing-subscriber 0.3、signal-hook 0.3、sha2 0.10、
+bpf-linker 0.10.4、clap 4、tracing 0.1、tracing-subscriber 0.3、signal-hook 0.3、sha2 0.10、hmac 0.12、
 libc 0.2；测试使用 proptest 1，基准使用自研 Rust workload 驱动与 Linux perf
 
 **Storage**: 不使用数据库；读取 `/etc/audit/rules.d/*.rules` 或
 `/etc/audit/audit.rules` 和 `/etc/auditd-ebpf/risk-acceptance.toml`；运行状态位于有界内存
-映射和队列，基准原始结果写入版本化 JSON/Markdown
+映射和队列，生命周期证据写 `/var/lib/auditd-ebpf/lifecycle.toml`，基准原始结果写入版本化
+JSON/Markdown
 
 **Testing**: `cargo test`、规则解析属性测试、共享 ABI 布局测试、格式契约 golden test、
 特权 QEMU/真实内核加载测试、systemd/journald/rsyslog 集成测试、24 小时稳定性和同机对照基准
@@ -46,6 +49,8 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 用户态输出，内核仍有界采集并提交 RingBuf；生产部署必须完成 root 可信 TOML 风险接受，
 审批绑定版本化有效策略摘要且无固定到期，并限制 journal、文件、rsyslog 和远端日志读取权限，
 远端转发使用经认证的加密通道且配置保留期；禁止依赖 C/libbpf/BCC 或未合并的 Rust CO-RE 方案
+；所有规则必须恰好一个 key；路径只承诺进程 root/mount namespace 内的字符串语义，挂载边界
+不确定时必须 gap；主机身份在进程生命周期内稳定；异常关闭不得伪造精确丢失数
 
 **Scale/Scope**: 默认最多 4,096 条规范化规则、65,536 个并发 syscall 上下文、
 16 MiB RingBuf、64 MiB 初始用户队列和 512 MiB 队列硬上限；默认单事件最大 8 KiB，
@@ -60,6 +65,7 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 - [x] 共享 ABI 包含 schema 版本、记录长度、固定宽度字段、规则版本和丢失计数
 - [x] 计划定义能力探测、规则文件权限、argv 原样输出与关闭控制、截断、日志访问控制、
   加密转发、保留期、root 可信风险接受、策略摘要和内存硬上限
+- [x] 计划定义必填 key、mount namespace 路径边界、稳定 host/machine_id 和异常关闭 gap
 - [x] 规划单元、属性、ABI、格式、特权内核、日志链路、稳定性和兼容矩阵测试
 - [x] 规格和基准协议已量化 CPU、吞吐、延迟、内存、正确性和事件丢失目标
 - [x] 公共 API、unsafe、ABI、验证器约束和内核兼容路径必须包含中文文档或安全注释
@@ -72,12 +78,15 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 
 ### Event Flow
 
-1. 用户态按文件名排序读取规则文件，完成词法、语法、字段和可信权限验证。
+1. 用户态按文件名排序读取规则文件，完成词法、语法、必填单一 key、字段和可信权限验证；
+   同时冻结 `node_name`/hostname，派生应用专用 `machine_id`，读取旧生命周期记录并持久写 dirty。
 2. 规则库将 `-a always,exit`、`-S`、`-F arch/uid/gid/success/path/dir/perm`
    与 `-k`，以及 legacy `-w/-p/-k` 形式规范化为有序 `RuleSet`。
 3. 编译器将全部规则需要的 syscall 数字并集和粗粒度身份条件写入双缓冲 BPF maps，
    再原子切换活动 generation；进程 ABI 架构和精确 first-match 语义保留在用户态。
-4. `raw_syscalls:sys_enter/sys_exit` 采集 syscall 参数与结果；`sched_process_exec/fork/exit`
+4. `raw_syscalls:sys_enter/sys_exit` 采集 syscall 参数与结果；成功的 mount/umount2/move_mount/
+   mount_setattr/chroot/pivot_root/setns/unshare 产生路径边界变化并递增用户态全局 mount epoch；
+   `sched_process_exec/fork/exit`
    维护执行事件和进程缓存。exec argv 在 sys_enter 立即发送 `ExecAttempt`，成功由
    `sched_process_exec`、失败由 sys_exit 发送 `ExecResult`，用户态按 PID 和 attempt ID 关联。
    即使全局或规则级配置关闭 argv 输出，内核仍按相同上限采集并提交参数；只读取稳定
@@ -88,20 +97,26 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
    计量的用户态自适应队列，写线程格式化为单行 audit 风格 `key=value` 并写入 stdout。
 7. 用户队列从 64 MiB 按高水位倍增到 512 MiB；达到硬上限后丢弃新事件、计数并进入 degraded。
 8. 诊断和周期健康记录写入 stderr；systemd/journald 负责采集，rsyslog 负责持久化和转发。
+9. 正常停止完成排空、最终状态和 link/map 清理后原子写 clean；下次启动发现旧 dirty 时把
+   `unclean_shutdown count=?` 作为首个审计 gap 输出，并进入 degraded。
 
 ### Rule and Path Semantics
 
 - 规则文件使用 C locale 的字节顺序排序；文件内保持原始顺序。首版仅支持 `always,exit`，
-  同一事件命中多条规则时采用 first-match，并输出该规则 key。
+  每条规则必须恰好一个 `-k` 或 `-F key=`；缺失或重复 key 拒绝整套候选规则。同一事件命中
+  多条规则时采用 first-match，并输出该规则 key。
 - 规则级 argv 覆盖按 audit key 配置。仅当某个 key 存在覆盖时，该 key 在候选 exec 规则中
   必须唯一；冲突时拒绝整套候选 RuleSet 并报告所有来源位置。未配置覆盖的重复 key 保持
   audit 兼容，不额外拒绝。
 - `path=` 和 `dir=` 仅接受绝对、规范化的规则路径。内核捕获路径型 syscall 的原始路径、
-  `dirfd` 和调用参数，用户态结合进程 cwd/fd 缓存生成规范化绝对路径。
-- 进程缓存通过服务启动时扫描 `/proc` 初始化，并通过 fork、exec、chdir、fchdir、open、dup、
-  close 和 exit 事件维护。缓存键包含 PID 与启动时间，防止 PID 复用；同时从 ELF class 和
+  `dirfd` 和调用参数，用户态结合线程 root、mount namespace、cwd/fd 与 mount epoch 生成
+  namespace 内规范化绝对路径；不解析 symlink/inode/hard-link 等价。
+- 进程缓存通过服务启动时扫描 `/proc/*/task/*` 初始化，并通过 fork、exec、chdir、fchdir、open、dup、
+  close、namespace/root 变化和 exit 事件维护。进程身份键包含 TGID 与启动时间，线程路径键包含
+  TID、进程身份、mount namespace `(st_dev, st_ino)` 和 epoch，防止 PID/TID 复用；同时从 ELF class 和
   fork/exec 关系维护 B64/B32 ABI。未知 ABI 的 syscall 作为候选上送，用户态无法确认时输出 gap。
-- 路径因进程退出、fd 竞争或缓存缺口无法可靠解析时，不得猜测。系统输出
+- 任意成功挂载/namespace/root 变化使全局 mount epoch 递增并失效全部路径缓存，避免遗漏共享
+  mount 传播。路径因进程退出、fd 竞争、`/proc` 刷新或 mountinfo 解析失败无法可靠解析时不得猜测。系统输出
   `type=AUDITD_EBPF_GAP reason=path_resolution_failed`，附候选规则、原始路径和丢失计数，
   并将健康状态标为 degraded。
 - `perm=r/w/x/a` 编译为版本化 syscall 操作分类表；兼容矩阵明确每个 syscall 的操作类别。
@@ -110,20 +125,20 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 
 | Requirements | Design/Contract |
 |---|---|
-| FR-001–FR-005 | RuleSource/RuleSet、规则 EBNF、双 generation 重载与 CLI |
-| FR-006–FR-010a | KernelEvent/ResolvedAuditEvent、event-format stdout 契约 |
-| FR-011–FR-013 | AdaptiveQueue、HealthSnapshot、health-and-logging、check-rules |
+| FR-001–FR-005 | 必填 key 的 RuleSource/RuleSet、规则 EBNF、双 generation 重载与 CLI |
+| FR-006–FR-010a | HostIdentity、PathResolutionBoundary、KernelEvent/ResolvedAuditEvent、event-format stdout 契约 |
+| FR-011–FR-013 | AdaptiveQueue、HealthSnapshot、LifecycleMarker、health-and-logging、check-rules |
 | FR-014–FR-016 | Benchmark entities、benchmark-protocol、quickstart comparison |
 | SR-001–SR-002 | Lifecycle/capabilities、可信规则文件校验、systemd sandbox |
 | SR-003–SR-003a、SR-004–SR-005 | argv 原样输出与用户态抑制、唯一 key 覆盖、root 可信风险接受、策略摘要、日志访问控制、加密转发、截断、转义、规则和内存容量硬上限 |
 | SR-006–SR-007 | 健康状态机、gap 事件、基准隔离与清理 |
-| SC-001–SC-004 | parser/golden/privileged/logging 端到端测试 |
+| SC-001–SC-004 | parser/golden/host/path namespace/异常关闭/logging 端到端测试 |
 | SC-005–SC-009 | benchmark protocol、内核矩阵、24 小时稳定性和生产安全策略验证 |
 
 ### Lifecycle and Privileges
 
 - 启动顺序为：验证配置和文件权限 → 探测内核能力 → 加载 maps/programs → 原子安装规则 →
-  挂载 hooks → 启动消费者 → 输出 ready 状态。
+  持久写 dirty → 挂载 hooks → 启动消费者 → 输出历史 unclean gap → 输出 ready 状态。
 - 生产模式在加载 eBPF 前验证风险接受记录、journal 获准组、本地日志与导出文件权限、
   rsyslog 目的地和经认证的加密转发配置；任一项缺失或无法验证时拒绝通过生产安全门禁，
   且不得输出 `state=healthy` 的生产就绪声明。
@@ -135,6 +150,8 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
   仅兼容探测需要时允许 `CAP_SYS_ADMIN`，启动后立即删除；不长期保留 `CAP_SYS_RESOURCE`。
 - `SIGHUP` 触发规则重载。新规则全部验证和填充完成后才切换 generation；失败保留旧版本。
 - `SIGTERM/SIGINT` 停止新事件、排空用户队列至超时、输出最终计数、分离 links 并退出。
+- 只有上述步骤全部成功后才原子写 clean；SIGKILL、崩溃或掉电保留 dirty。生命周期文件 root
+  所有且模式 `0600`，不包含审计事件内容。
 - 不提供网络监听端口或常驻控制 socket；`check-rules`、`check-production`、
   `print-policy-digest`、`print-capabilities` 和 `benchmark-info` 为只读 CLI 操作。
 
@@ -154,6 +171,7 @@ specs/001-auditd-ebpf-replacement/
 │   ├── cli.md
 │   ├── event-format.md
 │   ├── health-and-logging.md
+│   ├── lifecycle-state.md
 │   └── risk-acceptance.md
 └── tasks.md
 ```
@@ -212,6 +230,7 @@ benchmarks/
 - [x] 定义 RingBuf、每 CPU 计数、自适应用户队列和健康状态策略
 - [x] 定义 stdout/journald/rsyslog 日志契约
 - [x] 定义 argv 用户态抑制、唯一 key 覆盖和生产风险接受策略摘要
+- [x] 定义 mount namespace 路径字符串语义、稳定主机身份和异常关闭证据
 - [x] 定义 auditd 公平基准、正确性前置门禁和结果发布规则
 
 详细结论见 [research.md](research.md)。
@@ -223,6 +242,7 @@ benchmarks/
 - [x] [contracts/event-format.md](contracts/event-format.md) 固定单行输出和转义
 - [x] [contracts/cli.md](contracts/cli.md) 固定服务 CLI、退出码和信号行为
 - [x] [contracts/health-and-logging.md](contracts/health-and-logging.md) 固定健康状态和计数器
+- [x] [contracts/lifecycle-state.md](contracts/lifecycle-state.md) 固定 dirty/clean 持久状态和异常关闭 gap
 - [x] [contracts/risk-acceptance.md](contracts/risk-acceptance.md) 固定审批 TOML、策略摘要和失效规则
 - [x] [contracts/benchmark-protocol.md](contracts/benchmark-protocol.md) 固定公平对照方法
 - [x] [quickstart.md](quickstart.md) 定义端到端验收步骤
@@ -234,6 +254,7 @@ benchmarks/
 - [x] ABI、事件格式、健康计数、规则版本和截断均有独立契约
 - [x] 权限、argv 原样输出与用户态抑制、唯一 key 覆盖、root 可信风险接受、策略摘要、日志
   访问与加密、资源硬上限、失效状态和失败关闭均可测试
+- [x] 必填规则 key、host/machine_id、mount namespace 失效与 unclean shutdown 均有契约和测试路径
 - [x] 设计工件覆盖所有宪章测试层级及内核兼容矩阵
 - [x] 性能结论受正确性门禁、重复次数和完整报告约束
 - [x] 中文注释与安全文档要求已进入代码边界和评审门禁

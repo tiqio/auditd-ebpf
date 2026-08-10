@@ -69,6 +69,16 @@ sudo target/release/auditd-ebpf print-capabilities
 
 负例：加入 `-F auid=1000` 后 `check-rules` 必须返回 3，并准确报告文件与行号；删除负例后继续。
 
+分别创建以下无效规则并验证每次均返回 3，且诊断明确指出 key 缺失或重复：
+
+```text
+-a always,exit -F arch=b64 -S execve
+-a always,exit -F arch=b64 -S execve -k first -k second
+-a always,exit -F arch=b64 -S execve -k first -F key=second
+```
+
+这证明每条受支持 syscall/watch 规则必须且只能包含一个非空 key。
+
 ## 5. Run Foreground Validation
 
 传统 auditd 必须在隔离测试机上停止，避免重复事件：
@@ -80,6 +90,7 @@ sudo touch /tmp/auditd-ebpf-validation/identity
 
 sudo target/release/auditd-ebpf run \
   --rules-dir /etc/auditd-ebpf/rules.d \
+  --node-name validation-node \
   --status-interval 2s
 ```
 
@@ -92,7 +103,12 @@ sudo chmod 0600 /tmp/auditd-ebpf-validation/identity
 ```
 
 期望 stdout 出现 `type=AUDITD_EBPF`，分别包含 `key="exec-test"` 和
-`key="identity-test"`。exec 事件必须包含完整测试 argv 或显式 `argv_truncated=yes`。
+`key="identity-test"`。exec 事件必须包含完整测试 argv 或显式 `argv_truncated=yes`。全部记录的
+`host` 必须为 `validation-node`，`machine_id` 必须是同一个 32 位小写十六进制摘要；不得出现
+`/etc/machine-id` 原值。
+
+移除 `--node-name` 重启后，记录的 `host` 必须等于启动时 `hostname` 输出。服务运行期间临时
+修改 hostname 后，新记录仍必须保持启动快照；再次重启才允许采用新 hostname。
 
 输出格式以 [event-format.md](contracts/event-format.md) 为准。
 
@@ -121,6 +137,7 @@ journalctl -u auditd-ebpf.service --since '-1 minute' --no-pager
 ```
 
 期望：审计事件、诊断和状态均为单行；可按 `AUDITD_EBPF`、`AUDITD_EBPF_STATUS` 区分。
+从触发命令开始计时，匹配事件必须在 10 秒内可由 `journalctl` 检索，满足 SC-003。
 
 ## 8. Validate rsyslog Routing
 
@@ -130,12 +147,17 @@ sudo install -m 0644 packaging/rsyslog/60-auditd-ebpf.conf \
 sudo rsyslogd -N1
 sudo systemctl restart rsyslog
 
-/usr/bin/id auditd-ebpf-rsyslog-test
+/usr/bin/printf '%s\n' auditd-ebpf-rsyslog-test
 sudo grep 'key="exec-test"' /var/log/auditd-ebpf/events.log
 ```
 
 期望：目标文件中存在完整单行事件；状态和诊断不混入事件文件。具体路由必须符合
 [health-and-logging.md](contracts/health-and-logging.md)。
+
+提取 journal 中服务实际输出行与 rsyslog 目标行，去除 journal 自身前缀后执行逐字节比较；两者
+必须完全一致。再以 `--no-emit-argv` 运行并触发 exec，rsyslog 记录必须保留
+`argv_output=suppressed` 且不存在任何 `aN`；该有意缺失不得被补写或判定为传输损坏。rsyslog
+目标中的相同事件也必须在触发后 10 秒内可检索。
 
 ## 9. Validate Backpressure and Loss Visibility
 
@@ -150,8 +172,24 @@ sudo kill -USR1 "$(pidof auditd-ebpf)"
 
 期望：业务 workload 不被阻塞；队列先增长到硬上限；发生丢弃时出现
 `type=AUDITD_EBPF_GAP`，状态变为 degraded，`ring_lost` 或 `queue_lost` 非零且与 gap 数量一致。
+从首次已知丢失开始计时，gap、非零计数和 degraded 状态必须全部在 10 秒内出现，满足 SC-004。
 
-## 10. Run Privileged Kernel Tests
+## 10. Validate Path Namespace Boundaries
+
+运行特权测试场景，分别覆盖 mount namespace、chroot 与挂载变更：
+
+```bash
+sudo cargo xtask test-kernel --case path-mount-namespace
+sudo cargo xtask test-kernel --case path-chroot
+sudo cargo xtask test-kernel --case path-mount-epoch
+```
+
+期望：相同路径字符串在不同 process root/mount namespace 中独立求值；成功的 `mount`、
+`umount2`、`move_mount`、`mount_setattr`、`chroot`、`pivot_root`、`setns` 或 `unshare` 使旧路径
+上下文失效。无法在新边界中可靠重建时，10 秒内输出 path gap 并进入 degraded；测试不得以
+symlink、hard link 或 inode 等价性作为首版通过条件。
+
+## 11. Run Privileged Kernel Tests
 
 ```bash
 sudo cargo xtask test-kernel --kernel 5.15
@@ -162,7 +200,7 @@ sudo cargo xtask test-kernel --kernel 6.12
 
 测试必须覆盖加载、挂载、syscall/exec/path 事件、规则重载、RingBuf 丢失、异常停止和 link 清理。
 
-## 11. Run the auditd Comparison
+## 12. Run the auditd Comparison
 
 ```bash
 sudo target/release/auditd-ebpf-bench prepare --output benchmarks/reports
@@ -182,17 +220,42 @@ sudo target/release/auditd-ebpf-bench compare \
 - 至少两类吞吐或 p95 改善达到 10%。
 - 报告保留所有有效、无效和失败样本。
 
-## 12. Shutdown Validation
+## 13. Shutdown and Lifecycle Validation
 
 ```bash
 sudo systemctl stop auditd-ebpf.service
 sudo bpftool prog show | grep auditd-ebpf || true
 sudo bpftool map show | grep auditd-ebpf || true
+sudo stat -c '%a %U %G %n' /var/lib/auditd-ebpf/lifecycle.toml
+sudo grep '^state = "clean"$' /var/lib/auditd-ebpf/lifecycle.toml
 ```
 
-期望：服务在超时内排空并输出 `final=yes` 状态；无活动程序、map 或 link 遗留。
+期望：服务在超时内排空并输出 `final=yes` 状态；无活动程序、map 或 link 遗留；生命周期文件为
+root:root `0600` 的非符号链接普通文件且状态为 clean。随后正常重启不得产生
+`reason=unclean_shutdown`。
 
-## 13. Validate argv Risk Acceptance and Log Access
+验证异常停止：
+
+```bash
+sudo systemctl start auditd-ebpf.service
+sudo kill -KILL "$(systemctl show -p MainPID --value auditd-ebpf.service)"
+sudo systemctl start auditd-ebpf.service
+
+deadline=$((SECONDS + 10))
+while (( SECONDS < deadline )); do
+  journalctl -u auditd-ebpf.service --since '-15 seconds' --no-pager \
+    | grep -q 'type=AUDITD_EBPF_GAP .*reason=unclean_shutdown count=?' && break
+  sleep 1
+done
+journalctl -u auditd-ebpf.service --since '-15 seconds' --no-pager \
+  | grep 'state=degraded .*reason=unclean_shutdown'
+```
+
+期望：重启后 10 秒内输出 `unclean_shutdown count=?`，状态为 degraded 且
+`unclean_shutdown=1`。不得输出推测的数字 count，不得从生命周期文件恢复或重放任何事件。
+文件原子持久化和状态顺序以 [lifecycle-state.md](contracts/lifecycle-state.md) 为准。
+
+## 14. Validate argv Risk Acceptance and Log Access
 
 exec 规则默认在事件上限内原样输出 argv。生产启用前，创建并审批风险接受记录，至少写明
 审批人、责任人、审批时间、用途、获准读取主体、日志目的地、传输保护、访问策略、保留期、

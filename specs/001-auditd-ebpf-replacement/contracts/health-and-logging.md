@@ -6,7 +6,7 @@
 |---|---|---|---:|
 | `starting` | 进程启动 | 全部程序、规则和消费者就绪 | no |
 | `healthy` | 无当前缺口 | 新增缺口或致命错误 | no |
-| `degraded` | 任意事件丢失、路径解析缺口或可恢复输出错误 | 连续 5 分钟无新增缺口 | no |
+| `degraded` | 任意事件丢失、路径解析缺口、历史 dirty 标记或可恢复输出错误 | 连续 5 分钟无新增缺口 | no |
 | `unhealthy` | 程序脱离、活动规则失效、stdout 永久失败、内部不变量破坏 | 无；准备退出 | yes |
 | `stopping` | SIGTERM/SIGINT | 排空完成或超时 | yes |
 
@@ -29,6 +29,7 @@
 | `exec_argv_suppressed_total` | rule engine | first-match 后未输出 argv 的 exec 事件 |
 | `queue_dropped_total` | queue | 用户队列达到硬上限 |
 | `path_resolution_failed_total` | process cache | 不能可靠规范化路径 |
+| `unclean_shutdown_detected_total` | lifecycle | 启动时发现历史 dirty 标记；首版每次启动为 0 或 1 |
 | `event_parse_failed_total` | collector | schema/长度/字段无效 |
 | `stdout_write_failed_total` | writer | stdout write/flush 错误 |
 | `rule_reload_success_total` | reload | 原子切换成功 |
@@ -48,13 +49,15 @@ exec_argv_suppressed_total <= exec_argv_captured_total
 每 10 秒及 SIGUSR1 时向 stderr 输出 `type=AUDITD_EBPF_STATUS`：
 
 ```text
-type=AUDITD_EBPF_STATUS state=healthy production_policy=passed uptime_s=600 rule_version=184467 programs_attached=5 events_seen=100000 events_submitted=100000 events_consumed=100000 events_matched=82000 events_output=82000 argv_captured=12000 argv_suppressed=2000 ring_lost=0 queue_lost=0 path_lost=0 parse_failed=0 stdout_failed=0 queue_used_bytes=1048576 queue_limit_bytes=67108864 queue_max_bytes=536870912
+type=AUDITD_EBPF_STATUS state=healthy production_policy=passed uptime_s=600 rule_version=184467 programs_attached=5 events_seen=100000 events_submitted=100000 events_consumed=100000 events_matched=82000 events_output=82000 argv_captured=12000 argv_suppressed=2000 ring_lost=0 queue_lost=0 path_lost=0 unclean_shutdown=0 parse_failed=0 stdout_failed=0 queue_used_bytes=1048576 queue_limit_bytes=67108864 queue_max_bytes=536870912
 ```
 
 - 数值字段不可省略；不可用值使用 `?`。
 - 状态变化必须立即输出，不等待周期。
 - degraded 记录必须包含 `reason` 和首次/最近发生时间。
 - 停止前必须输出 final=yes 的最终记录。
+- 启动发现历史 dirty 标记时，10 秒内必须同时输出 `reason=unclean_shutdown count=?` gap、
+  `state=degraded reason=unclean_shutdown` 状态，并令 `unclean_shutdown=1`。
 
 ## systemd Contract
 
@@ -77,7 +80,8 @@ LimitMEMLOCK=infinity
 ```
 
 - `CAP_SYS_ADMIN` 仅作为兼容回退；能力探测通过后进程必须从 effective/permitted 集合删除。
-- `ProtectSystem=strict` 下只读规则和配置，允许写入的路径仅限运行目录和可选基准输出目录。
+- `ProtectSystem=strict` 下只读规则和配置，允许写入的路径仅限运行目录、
+  `/var/lib/auditd-ebpf` 生命周期目录和可选基准输出目录。
 - 发行包不得同时自动启动 auditd 与 auditd-ebpf。
 
 ## rsyslog Contract
@@ -87,6 +91,8 @@ LimitMEMLOCK=infinity
 - `AUDITD_EBPF_STATUS` 与 `AUDITD_EBPF_DIAG` 必须进入独立运维日志或远端 stream。
 - 必须显式设置 action queue 和磁盘辅助队列；远端不可用不能反向阻塞服务 stdout。
 - journald/rsyslog 的 rate limit、丢弃和队列统计纳入端到端稳定性测试。
+- rsyslog 保存的事件必须与服务完成 argv 输出策略后写入 stdout 的整行逐字节一致；
+  `argv_output=suppressed` 记录缺少 `aN` 是预期契约，不得补齐或标记为不完整。
 
 ## Unredacted argv Production Gate
 
@@ -112,7 +118,7 @@ LimitMEMLOCK=infinity
 
 ## Alert Recommendations
 
-- 任意 `ring_lost`、`queue_lost` 或 `path_lost` 增量：立即告警。
+- 任意 `ring_lost`、`queue_lost`、`path_lost` 或 `unclean_shutdown` 增量：立即告警。
 - `state=unhealthy` 或进程退出码 4–9：严重告警。
 - 队列持续 60 秒高于 80%：容量/下游告警。
 - 连续 5 分钟无状态记录：存活告警。

@@ -46,6 +46,8 @@
 ### Validation
 
 - 所有 syscall 必须能在所选 arch 的 syscall table 中解析。
+- 每条 syscall 或 watch 规则必须且只能包含一个非空 `key`；缺失 key、同时使用 `-k` 与
+  `-F key=` 或重复 key term 均使整个候选 RuleSet 验证失败。
 - `path`/`dir` 必须绝对、词法规范化，禁止 `..`、NUL 和换行。
 - `perm` 必须与 path/dir 或 legacy watch 同时出现。
 - 不支持字段或操作符使整个候选 RuleSet 验证失败。
@@ -108,6 +110,20 @@ Active + reload failure → Active（旧版本不变）
 | `pid_tgid` | u64 | 高 32 位 TGID，低 32 位 PID |
 | `process_start_ns` | u64 | 可用时的进程启动标识 |
 
+## HostIdentity
+
+服务启动时确定一次并附加到该进程输出的全部 audit/gap 记录；运行期间不得因主机名变化而更新。
+
+| Field | Type | Description |
+|---|---|---|
+| `node_name` | non-empty string | 显式配置值优先，否则为启动时 hostname 快照 |
+| `node_name_source` | enum | `Configured/HostnameSnapshot` |
+| `machine_id_digest` | 16 bytes? | `/etc/machine-id` 有效时经应用专用 HMAC-SHA256 派生后截断 128 bits |
+| `derivation_version` | u16 | 首版为 1，防止未来算法变更产生静默歧义 |
+
+原始 `/etc/machine-id` 不得写入事件、状态或诊断；读取或派生失败时输出 `machine_id=?` 和
+可操作诊断，禁止使用随机值冒充稳定身份。
+
 ## SyscallEvent
 
 | Field | Type | Description |
@@ -153,30 +169,43 @@ Active + reload failure → Active（旧版本不变）
 
 pending exec 默认最多 65,536 项，超时 30 秒；缺少 attempt/result 必须产生 gap 和计数。
 
-## ProcessIdentity and ProcessState
+## ProcessIdentity and ThreadPathContext
 
-`ProcessIdentity` 是 `(tgid, start_time)`，全局唯一到一次启动周期。`ProcessState` 用于路径解析。
+`ProcessIdentity` 是 `(tgid, start_time)`，全局唯一到一次启动周期。路径求值以 TID 为单位，
+`ThreadPathContext` 绑定进程身份、线程身份和观测到的 mount namespace/path 边界。
 
 | Field | Type | Description |
 |---|---|---|
 | `identity` | ProcessIdentity | 主键 |
+| `tid` | u32 | 线程 ID；与 identity 一起组成路径上下文主键 |
 | `parent` | ProcessIdentity? | fork 关系 |
-| `cwd` | absolute path? | chdir/fchdir 后更新 |
+| `root` | absolute path? | 目标线程 process root 的 `/proc/<tid>/root` 视图 |
+| `mount_namespace` | `(st_dev, st_ino)?` | `/proc/<tid>/ns/mnt` 的稳定身份快照 |
+| `mount_epoch` | u64 | 建立上下文时的全局挂载版本 |
+| `mountinfo_snapshot` | bounded parsed view? | 来自 `/proc/<tid>/mountinfo`，只保留解析所需条目 |
+| `cwd` | absolute path? | 线程 cwd；chdir/fchdir 后更新 |
 | `exe` | absolute path? | exec 成功后更新 |
 | `uid/gid/euid/egid` | u32 | 最新身份快照 |
 | `abi_arch` | enum | B64/B32/Unknown，从 ELF class 与继承关系确定 |
-| `fd_table` | map<i32, FdEntry> | 有界、LRU，跟踪路径型 fd |
+| `fd_table` | map<i32, FdEntry> | 有界、LRU，跟踪该进程可见的路径型 fd 引用 |
 | `last_seen` | monotonic time | 淘汰依据 |
-| `confidence` | enum | exact/proc-snapshot/derived/unknown |
+| `confidence` | enum | proc-snapshot/derived/stale/unknown；首版不声明 inode exact |
 
-### Process State Transitions
+`PathResolutionBoundary` 由 `root + mount_namespace + mount_epoch` 构成。只有三者均可用且 epoch
+仍为当前值时，才能输出 namespace 内规范化路径字符串；否则必须产生 gap 并进入 degraded。
+首版不承诺 symlink、bind mount、hard link 或 inode 等价语义。
+
+### Path Context Transitions
 
 ```text
-/proc bootstrap → Running
-fork(parent) → Running(child inherits cwd/fd references)
+/proc bootstrap → Running(context from root/ns/mountinfo/cwd)
+fork/clone(parent) → Running(child inherits references, then validates TID namespace)
 exec success → Running(exe 更新；不缓存 argv)
 chdir/fchdir success → Running(cwd 更新)
 open/dup/close success → Running(fd_table 更新)
+mount/umount2/move_mount/mount_setattr success → mount_epoch++，全部路径缓存 stale
+chroot/pivot_root/setns/unshare success → mount_epoch++，全部路径缓存 stale
+namespace 身份、root 或 mountinfo 无法重新确认 → gap + degraded
 exit → Exited → 缓冲期后淘汰
 ```
 
@@ -189,12 +218,13 @@ exit → Exited → 缓冲期后淘汰
 | `event_id` | boot UUID + u64 | stdout 去重主键 |
 | `schema` | u16 | 输出契约版本 |
 | `event_time` | timestamp | ktime 与启动时钟换算 |
+| `host_identity` | HostIdentity | 同一服务进程中稳定的 `host` 与 `machine_id` |
 | `rule_version` | u64 | 采集时版本 |
 | `rule_id/key` | u32/bytes | first-match 结果 |
 | `arch/syscall/operation` | values | 规范化操作 |
 | `success/exit` | bool/i64 | 调用结果 |
 | `process` | ProcessIdentity fields | pid/ppid/uid/gid/comm/exe |
-| `path` | absolute path? | 解析成功时提供 |
+| `path` | absolute path? | 在事件进程 root + mount namespace 边界内可靠解析时提供 |
 | `argv_output` | enum | `Emitted/Suppressed`，由全局或 first-match 规则 key 决定 |
 | `argv` | list<bytes> | exec 采集参数；仅 `Emitted` 时交给格式器，随后释放 |
 | `truncation` | flags | 字段级截断 |
@@ -207,12 +237,40 @@ exit → Exited → 缓冲期后淘汰
 | Field | Type | Description |
 |---|---|---|
 | `event_id` | boot UUID + u64 | 唯一标识 |
-| `reason` | enum | ring_full/path_resolution/output_queue_full/parse_failure |
-| `count` | u64 | 合并事件数量，单次为 1 |
+| `reason` | enum | ring_full/path_resolution/output_queue_full/parse_failure/unclean_shutdown |
+| `count` | u64? | 已知时为合并数量；未正常停止导致的未知损失必须为 unknown |
 | `cpu` | u32? | RingBuf 丢失时提供 |
 | `pid/syscall/raw_path` | optional | 路径解析失败时提供 |
 | `candidate_rule_ids` | bounded list | 最多 16 个 |
 | `first_seen/last_seen` | timestamp | 合并窗口 |
+
+## LifecycleMarker
+
+唯一允许跨进程启动持久化的运行状态对象；不得包含或重放任何审计事件内容。默认路径为
+`/var/lib/auditd-ebpf/lifecycle.toml`。
+
+| Field | Type | Description |
+|---|---|---|
+| `version` | u16 | 首版为 1；未知主版本拒绝覆盖 |
+| `state` | enum | `Clean/Dirty` |
+| `boot_id` | UUID | `/proc/sys/kernel/random/boot_id` 快照 |
+| `invocation_id` | UUID | 本次服务启动唯一标识 |
+| `pid/start_time` | process identity | 写标记进程，避免 PID 复用歧义 |
+| `rule_version` | u64? | dirty 时为即将激活或活动版本，clean 时为最终版本 |
+| `final_counters` | bounded map<string,u64>? | 仅 clean 时保存最终累计计数摘要 |
+| `updated_at` | RFC 3339 timestamp | 最近一次原子持久化时间 |
+
+### Lifecycle State Transitions
+
+```text
+missing/clean → durable dirty → attach/accept events
+dirty on startup → durable dirty for new invocation + unclean_shutdown(count=?) gap + degraded
+dirty → stop accepting → drain/timeout → final status → link/map cleanup → durable clean
+SIGKILL/crash/power loss → dirty remains
+```
+
+dirty 必须在 attach 或接收任何事件之前完成持久化；clean 只能在完整优雅清理之后写入。生命周期
+文件仅证明上次清理是否完成，不能推导或伪造精确丢失事件数。
 
 ## AdaptiveQueue
 
@@ -236,6 +294,7 @@ exit → Exited → 缓冲期后淘汰
 | `ring_reserve_failed_per_cpu` | list<u64> | 每 CPU 丢失 |
 | `queue_dropped` | u64 | 用户队列丢失 |
 | `path_resolution_failed` | u64 | 路径缺口 |
+| `unclean_shutdown_detected` | u64 | 本次启动检测到的历史 dirty 标记数，首版为 0 或 1 |
 | `parse_failed/output_failed` | u64 | 用户态错误 |
 | `exec_argv_captured` | u64 | 内核成功提交包含 argv 的 ExecAttempt 数量 |
 | `exec_argv_suppressed` | u64 | first-match 后未输出 argv 的 exec 事件数量 |

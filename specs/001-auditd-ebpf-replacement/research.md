@@ -96,17 +96,29 @@ BTF 和 RingBuf 能力。内核发行版可能关闭配置，因此必须加载�
 ## 5. 路径规则
 
 **Decision**: path/dir 规则路径必须是绝对路径。eBPF 捕获路径型 syscall 的用户路径、dirfd、
-PID/TGID 和结果；用户态以 PID+启动时间进程缓存解析 cwd 和 fd，执行词法规范化和目录前缀匹配。
-解析失败输出 `AUDITD_EBPF_GAP`，列出候选规则并进入 degraded，不猜测或静默丢失。
+TID/TGID 和结果；用户态以线程路径上下文记录进程 root、mount namespace 标识、cwd、fd 和
+全局 `mount_epoch`，执行 namespace 内的词法规范化和目录前缀匹配。成功的 mount、umount2、
+move_mount、mount_setattr、chroot、pivot_root、setns 或 unshare 使全局 epoch 递增并保守失效
+全部路径缓存。缓存刷新失败时输出 `AUDITD_EBPF_GAP`、列出候选规则并进入 degraded。
 
-**Rationale**: 在不读取不稳定内核结构的前提下，这是 Aya-only 首版可复现的路径方案。
-显式 gap 记录使路径竞态成为可量化限制，而不是虚假的成功审计。
+**Rationale**: mount namespace 为不同进程提供不同挂载层次，`/proc/<tid>/mountinfo` 反映目标
+线程所在 namespace 的视图。使用 `/proc/<tid>/ns/mnt` 身份和全局 epoch 可避免读取不稳定内核
+结构，也避免错误模拟 shared-subtree 传播；代价是挂载变化后更保守地刷新缓存。显式 gap 记录
+使路径竞态成为可量化限制，而不是虚假的成功审计。首版只承诺 namespace 内路径字符串语义，
+不解析 symlink/inode/hard-link 等价，也不宣称与 auditd inode watch 相同。
 
 **Alternatives considered**:
 
 - 只匹配原始字符串：拒绝，无法正确处理相对路径和 `openat` dirfd。
 - 从 `/proc` 临时读取但失败时忽略：拒绝，产生不可见审计缺口。
 - 强制只允许业务使用绝对路径：不可由审计代理控制，拒绝。
+- 完整复制内核 mount/inode 语义：拒绝，需要更深内核结构访问并显著扩大验证器与兼容风险。
+
+**Sources**:
+
+- mount namespaces: https://man7.org/linux/man-pages/man7/mount_namespaces.7.html
+- `/proc/<pid>/mountinfo`: https://man7.org/linux/man-pages/man5/proc_pid_mountinfo.5.html
+- namespace handles: https://man7.org/linux/man-pages/man7/namespaces.7.html
 
 ## 6. 事件 ABI、RingBuf 与背压
 
@@ -251,3 +263,38 @@ argv 进入日志链路。audit key 是管理员已有的规则标签；覆盖�
 - auditctl rule keys: https://man7.org/linux/man-pages/man8/auditctl.8.html
 - systemd journal access: https://www.freedesktop.org/software/systemd/man/latest/systemd-journald.service.html
 - rsyslog TLS authentication: https://www.rsyslog.com/doc/tutorials/tls_cert_summary.html
+
+## 12. 规则 key、主机身份与异常关闭证据
+
+**Decision**: 首版所有 syscall/watch 规则必须恰好包含一个 `-k KEY` 或 `-F key=KEY`；缺失、
+重复或非法 key 拒绝整套候选 RuleSet。事件 `host` 使用显式 `node_name`，未配置时在启动时读取
+一次 hostname 并冻结到本次进程结束。`machine_id` 使用固定项目 app-id 对规范化
+`/etc/machine-id` 做 HMAC-SHA256，截断为 128 bit 并输出小写十六进制；原始 machine-id
+不得进入事件或诊断。machine-id 缺失、无效或派生失败时稳定输出 `machine_id=?` 并给出
+可操作诊断，不生成随机替代值。
+
+生命周期文件默认为 `/var/lib/auditd-ebpf/lifecycle.toml`。启动读取旧记录后，在 attach/接收
+事件前通过同目录临时文件、同步、原子 rename 和目录同步写入 dirty；只有停止接收、排空、
+输出最终计数且清理 links/maps 后才能写 clean。旧记录为 dirty 时，首个可用 stdout 审计记录
+必须是 `reason=unclean_shutdown count=?` gap，并使状态进入 degraded。生命周期文件不保存事件
+内容，也不尝试在崩溃后伪造精确丢失数量。
+
+**Rationale**: 强制 key 与规格的事件追踪及按 key argv 控制保持一致。应用专用 machine ID
+既能稳定关联同一主机，又避免直接暴露可跨应用关联的原始 machine-id。低频 clean/dirty 写入
+只发生在生命周期边界，不把性能关键路径变成磁盘队列；原子替换和同步降低掉电后误判 clean
+的风险，但仍诚实地把无法量化的事件窗口表示为未知。
+
+**Alternatives considered**:
+
+- 缺 key 时生成合成 key：拒绝，会改变管理员已有规则身份且降低可预测性。
+- 直接输出原始 machine-id：拒绝，增加跨应用关联风险。
+- 只使用 hostname：拒绝，主机重命名后无法稳定关联。
+- 持久化每个事件用于精确重放：拒绝，会重复实现日志存储并破坏性能目标。
+- 仅依赖 systemd 上次退出状态：拒绝，不能形成独立审计 gap 契约。
+
+**Sources**:
+
+- audit rule keys: https://man7.org/linux/man-pages/man8/auditctl.8.html
+- hostname: https://man7.org/linux/man-pages/man3/gethostname.3p.html
+- application-specific machine ID: https://www.freedesktop.org/software/systemd/man/sd_id128_get_machine.html
+- atomic rename: https://man7.org/linux/man-pages/man2/rename.2.html
