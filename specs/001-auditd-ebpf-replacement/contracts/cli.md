@@ -13,6 +13,9 @@ auditd-ebpf run \
   [--ring-buffer-bytes 16777216] \
   [--queue-initial-bytes 67108864] \
   [--queue-max-bytes 536870912] \
+  [--deployment-mode non-production|production] \
+  [--risk-acceptance-file /etc/auditd-ebpf/risk-acceptance.toml] \
+  [--emit-argv | --no-emit-argv] \
   [--status-interval 10s] \
   [--shutdown-timeout 30s] \
   [--log-level info]
@@ -24,6 +27,16 @@ auditd-ebpf run \
 2. 否则读取 `--rules-dir` 中后缀 `.rules` 的普通文件。
 3. 目录不存在或没有可用文件时回退 `/etc/audit/audit.rules`。
 4. 两者均不可用时启动失败。
+
+argv 与生产策略：
+
+- `--emit-argv` 为默认行为，在事件上限内原样输出匹配 exec 规则的 `a0`–`a31`。
+- `--no-emit-argv` 全局关闭 argv 读取和输出；配置文件允许按规则 key 设置
+  `argv.rules.<key>.enabled=false`，规则级设置优先于全局值。
+- `--deployment-mode production` 必须提供可信的风险接受文件，并在加载 eBPF 前通过 journal、
+  本地文件、导出、rsyslog 目的地、经认证加密转发和保留期验证。
+- `non-production` 允许门禁未通过时运行，但状态必须输出 `production_policy=failed`，且不得被
+  解释为生产就绪。
 
 ### `auditd-ebpf check-rules`
 
@@ -45,6 +58,19 @@ auditd-ebpf check-rules [--rules-dir PATH | --rules-file PATH] [--print-normaliz
 
 输出构建版本、Git commit、Rust/Aya 版本、默认容量、schema 和 benchmark protocol 版本，
 供基准报告采集环境信息。
+
+### `auditd-ebpf check-production`
+
+只验证风险接受记录和日志链路安全策略，不加载 eBPF。检查范围包括 journal 获准组、本地事件
+文件不宽于 `0640`、导出不宽于 `0600`、rsyslog 目的地、远端经认证加密、服务端身份验证和
+所有目的地保留期。
+
+```text
+auditd-ebpf check-production \
+  --risk-acceptance-file /etc/auditd-ebpf/risk-acceptance.toml
+```
+
+成功时 stdout 输出逐项 PASS 摘要；失败时 stderr 输出稳定错误码和修复建议，并返回退出码 9。
 
 ## Configuration Precedence
 
@@ -84,6 +110,7 @@ CLI arguments > environment variables > /etc/auditd-ebpf/config.toml > compiled 
 | 6 | eBPF 加载、map 或 attach 失败 |
 | 7 | 运行时不可恢复错误，包括 stdout 永久失败 |
 | 8 | 停止排空超时；最终状态记录包含未输出数量 |
+| 9 | 生产风险接受或日志访问、加密、保留策略门禁失败 |
 
 ## Version Output
 

@@ -41,6 +41,7 @@
 | `dir_filter` | absolute path | no | 与 `path_filter` 互斥 |
 | `permissions` | bit flags | no | `r/w/x/a`，不得为空 |
 | `key` | bytes | yes | 1–31 bytes，不含控制字符 |
+| `argv_output` | enum | yes | `Inherit/Enabled/Disabled`；仅 exec 规则有效，默认 `Inherit` |
 
 ### Validation
 
@@ -49,6 +50,8 @@
 - `perm` 必须与 path/dir 或 legacy watch 同时出现。
 - 不支持字段或操作符使整个候选 RuleSet 验证失败。
 - 同一事件按 `rule_id` 升序 first-match，不合并多个 key。
+- exec 规则的 `argv_output` 先应用规则级配置，再回退全局 `exec_argv_enabled=true`；关闭时仍输出
+  exec 元数据，但不读取或输出 `a0`–`a31`。
 
 ## RuleSet
 
@@ -234,6 +237,26 @@ exit → Exited → 缓冲期后淘汰
 | `parse_failed/output_failed` | u64 | 用户态错误 |
 | `queue_used/limit/max_bytes` | usize | 背压状态 |
 | `last_error` | code + timestamp | 最近错误 |
+| `production_policy` | enum | `NotRequested/Passed/Failed` |
+
+## ProductionPolicy
+
+表示启用默认原样 argv 输出时的生产安全门禁。风险接受记录只能确认风险取舍，不能关闭强制
+访问控制、保留、加密或事件响应检查。
+
+| Field | Type | Required | Validation |
+|---|---|---:|---|
+| `deployment_mode` | enum | yes | `NonProduction/Production` |
+| `risk_acceptance_path` | absolute path | production | root 所有，group/other 不得可写 |
+| `owner` | non-empty string | production | 明确责任人或责任团队 |
+| `purpose` | non-empty string | production | 记录采集和使用目的 |
+| `approved_readers` | bounded list | production | root 与获准审计管理员组，至少一项 |
+| `destinations` | bounded list | production | journal、本地文件、rsyslog 或远端接收端 |
+| `transport_protection` | enum | remote | 经认证加密及服务端身份验证方式 |
+| `retention_days` | u32 | production | 1–3,650，并与全部目的地一致 |
+| `incident_response` | non-empty string | production | 暴露、越权读取和转发失败处置要求 |
+| `validated_at` | timestamp | yes | 本次启动或检查时间 |
+| `validation_errors` | bounded list | no | 每项包含稳定错误码和可操作消息 |
 
 ### Health State Transitions
 

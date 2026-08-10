@@ -101,9 +101,10 @@
 ### Security & Audit Data Requirements *(mandatory)*
 
 - **SR-001**: 系统 MUST 明确功能所需的 Linux capabilities、权限生命周期和降权策略
-- **SR-002**: 系统 MUST 列出采集的审计字段及其用途、敏感级别、脱敏和保留策略
-- **SR-003**: 系统 MUST 定义配置无效、资源耗尽、事件丢失和输出失败时的可观测行为
-- **SR-004**: 系统 MUST 定义事件契约版本、兼容范围以及未知或缺失字段的处理方式
+- **SR-002**: 若功能匹配 exec 审计，系统 MUST 默认原样输出长度上限内的完整 argv，并提供关闭控制
+- **SR-003**: 系统 MUST 定义 argv 日志的获准读取主体、journal/文件权限、加密传输、保留期和生产风险接受
+- **SR-004**: 系统 MUST 定义配置无效、资源耗尽、事件丢失和输出失败时的可观测行为
+- **SR-005**: 系统 MUST 定义事件契约版本、兼容范围以及未知或缺失字段的处理方式
 
 ### Key Entities *(include if feature involves data)*
 

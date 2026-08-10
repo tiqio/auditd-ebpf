@@ -41,7 +41,7 @@
 
 - [ ] T010 [P] 为 `KernelEventHeader`、syscall/exec 记录的大小、对齐、版本和越界添加失败布局测试于 `crates/auditd-ebpf-common/tests/abi_layout.rs`
 - [ ] T011 [P] 为未知 schema、非法长度、截断记录和非对齐字节添加失败解码测试于 `crates/auditd-ebpf/tests/event_decode.rs`
-- [ ] T012 [P] 为 CLI 优先级、容量范围、未知键和非法单位添加失败配置测试于 `crates/auditd-ebpf/tests/config_contract.rs`
+- [ ] T012 [P] 为 CLI 优先级、容量范围、argv 全局/规则级控制、生产风险接受、未知键和非法单位添加失败配置测试于 `crates/auditd-ebpf/tests/config_contract.rs`
 - [ ] T013 [P] 为 BTF、RingBuf、raw tracepoint、tracepoint 和 capability 探测结果添加 mock 测试于 `crates/auditd-ebpf/tests/capability_probe.rs`
 - [ ] T014 [P] 为自适应队列容量不变量和健康状态转换添加失败测试于 `crates/auditd-ebpf/tests/foundation_state.rs`
 
@@ -49,8 +49,8 @@
 
 - [ ] T015 实现 `#[repr(C)]` 固定宽度 ABI、schema 常量、记录类型和中文安全文档于 `crates/auditd-ebpf-common/src/event.rs`、`crates/auditd-ebpf-common/src/lib.rs`
 - [ ] T016 实现用户态记录长度校验、无未对齐引用的安全解码和错误类型于 `crates/auditd-ebpf/src/collector/decode.rs`、`crates/auditd-ebpf/src/collector/mod.rs`
-- [ ] T017 实现 TOML/环境变量/CLI 配置结构、默认容量和严格校验于 `crates/auditd-ebpf/src/config/model.rs`、`crates/auditd-ebpf/src/config/load.rs`、`crates/auditd-ebpf/src/config/mod.rs`
-- [ ] T018 实现 `run`、`check-rules`、`print-capabilities`、`benchmark-info` 命令与退出码骨架于 `crates/auditd-ebpf/src/cli.rs`、`crates/auditd-ebpf/src/main.rs`
+- [ ] T017 实现 TOML/环境变量/CLI 配置结构、默认容量、argv 全局/规则级控制、生产风险接受模型和严格校验于 `crates/auditd-ebpf/src/config/model.rs`、`crates/auditd-ebpf/src/config/load.rs`、`crates/auditd-ebpf/src/config/mod.rs`
+- [ ] T018 实现 `run`、`check-rules`、`check-production`、`print-capabilities`、`benchmark-info` 命令与退出码骨架于 `crates/auditd-ebpf/src/cli.rs`、`crates/auditd-ebpf/src/main.rs`
 - [ ] T019 实现内核版本、x86_64、BTF、BPF syscall、RingBuf、raw tracepoint、tracepoint 和 capabilities 探测于 `crates/auditd-ebpf/src/capabilities.rs`
 - [ ] T020 实现 eBPF map、每 CPU 基础计数器、活动 generation 和空程序骨架于 `crates/auditd-ebpf-ebpf/src/maps.rs`、`crates/auditd-ebpf-ebpf/src/programs/mod.rs`、`crates/auditd-ebpf-ebpf/src/main.rs`
 - [ ] T021 实现 Aya 对象加载、map 获取、程序 attach/link 生命周期和失败清理于 `crates/auditd-ebpf/src/loader.rs`
@@ -139,10 +139,10 @@ syscall、exec、绝对/相对/dirfd 路径操作；预期事件覆盖 100%、�
 - [ ] T069 [US2] 实现 collector→AdaptiveQueue→stdout writer、按字节动态增长、硬上限 drop-new 和 flush 错误处理于 `crates/auditd-ebpf/src/output/writer.rs`、`crates/auditd-ebpf/src/output/adaptive_queue.rs`
 - [ ] T070 [US2] 实现 eBPF 每 CPU 计数聚合、状态变化即时记录、10 秒周期记录和 5 分钟恢复窗口于 `crates/auditd-ebpf/src/health/reporter.rs`、`crates/auditd-ebpf/src/health/counters.rs`
 - [ ] T071 [US2] 实现启动顺序、ready、信号优先级、停止排空、link 清理和最终状态于 `crates/auditd-ebpf/src/runtime.rs`
-- [ ] T072 [US2] 将配置、capability、loader、rules、collector、writer 和 health 组装进 `run` 命令于 `crates/auditd-ebpf/src/commands/run.rs`、`crates/auditd-ebpf/src/main.rs`
+- [ ] T072 [US2] 将配置、生产风险接受与日志策略门禁、capability、loader、rules、collector、writer 和 health 组装进 `run`/`check-production` 命令于 `crates/auditd-ebpf/src/commands/run.rs`、`crates/auditd-ebpf/src/commands/check_production.rs`、`crates/auditd-ebpf/src/main.rs`
 - [ ] T073 [P] [US2] 编写最小 capability、只读文件系统、journal 输出和 reload 的 hardened unit 于 `packaging/systemd/auditd-ebpf.service`
 - [ ] T074 [P] [US2] 编写 imjournal 持久游标、事件/运维分流、磁盘辅助队列和限速配置于 `packaging/rsyslog/60-auditd-ebpf.conf`
-- [ ] T075 [P] [US2] 编写中文配置参考、systemd 部署、rsyslog 路由和敏感 argv 警告于 `docs/configuration.md`、`docs/operations.md`
+- [ ] T075 [P] [US2] 编写中文配置参考、argv 默认原样输出与关闭控制、systemd/journal 访问权限、rsyslog 加密转发、保留期和生产风险接受于 `docs/configuration.md`、`docs/operations.md`
 - [ ] T076 [US2] 按 quickstart 执行 journalctl、rsyslog、backpressure、reload 和 shutdown 端到端测试并保存脚本于 `tests/integration/logging_end_to_end.sh`
 - [ ] T077 [US2] 运行格式/属性/信号/systemd/rsyslog/背压和 US2 quickstart 门禁，并创建日志集成里程碑 commit，涉及 `crates/auditd-ebpf/src/output/`、`crates/auditd-ebpf/src/health/`、`packaging/`
 
@@ -197,14 +197,14 @@ syscall、exec、绝对/相对/dirfd 路径操作；预期事件覆盖 100%、�
 - [ ] T101 [P] 审核公共 API、ABI 字段、复杂算法、兼容处理和错误路径的中文文档与注释于 `crates/auditd-ebpf-common/src/`、`crates/auditd-ebpf/src/`、`crates/auditd-ebpf-ebpf/src/`、`crates/auditd-ebpf-rules/src/`
 - [ ] T102 [P] 审核所有 unsafe、用户/内核指针读取、循环上界、栈/map 容量和 verifier 日志并记录结论于 `docs/security-review.md`
 - [ ] T103 [P] 运行 cargo-deny、依赖许可证、安全公告和上游来源审计并固定结果于 `deny.toml`、`docs/dependency-audit.md`
-- [ ] T104 [P] 验证并收紧 systemd capabilities、NoNewPrivileges、ProtectSystem、可写路径和规则文件权限于 `packaging/systemd/auditd-ebpf.service`、`tests/privileged/systemd_sandbox.sh`
+- [ ] T104 [P] 验证并收紧 systemd capabilities、NoNewPrivileges、ProtectSystem、可写路径、规则文件权限、journal 获准组、本地日志 `0640`、导出 `0600`、rsyslog 目的地、经认证加密转发和风险接受门禁于 `packaging/systemd/auditd-ebpf.service`、`tests/privileged/systemd_sandbox.sh`
 - [ ] T105 在 5.15/6.1/6.6/6.12 x86_64 执行加载、规则、事件、丢失、reload 和清理矩阵并保存结果于 `tests/vm/results/kernel-matrix.md`
 - [ ] T106 [P] 添加规则 lexer/parser fuzz target、恶意路径/argv corpus 和资源上限回归于 `fuzz/Cargo.toml`、`fuzz/fuzz_targets/rule_parser.rs`、`fuzz/corpus/rule_parser/`
 - [ ] T107 执行 24 小时稳定性、内存增长、计数不变量和无遗留 link/map 测试并保存结果于 `tests/stability/run-24h.sh`、`tests/stability/report.md`
 - [ ] T108 [P] 注入 RingBuf 满、用户队列满、stdout 关闭、journald 限速、rsyslog 断网和磁盘满故障于 `tests/failure-injection/run.sh`、`tests/failure-injection/report.md`
 - [ ] T109 完整执行 `specs/001-auditd-ebpf-replacement/quickstart.md` 并记录每步命令、结果和偏差于 `docs/quickstart-validation.md`
 - [ ] T110 [P] 实现安装、升级、卸载、auditd 冲突保护和配置保留脚本于 `packaging/install.sh`、`packaging/uninstall.sh`、`packaging/upgrade.sh`
-- [ ] T111 核对 FR-001–FR-016、SR-001–SR-007、SC-001–SC-008 与测试证据的最终追踪矩阵于 `docs/requirements-traceability.md`
+- [ ] T111 核对 FR-001–FR-016、SR-001–SR-003a、SR-004–SR-007、SC-001–SC-009 与测试证据的最终追踪矩阵于 `docs/requirements-traceability.md`
 - [ ] T112 [P] 编写版本、迁移限制、已知路径语义差异、回滚和性能报告链接于 `CHANGELOG.md`、`docs/release-notes.md`
 - [ ] T113 运行 workspace 全量格式/Clippy/test、eBPF 构建、内核矩阵、安全、稳定性、quickstart 和报告门禁，并创建发布里程碑 commit，涉及 `Cargo.toml`、`crates/`、`tests/`、`docs/`、`packaging/`、`benchmarks/reports/`
 

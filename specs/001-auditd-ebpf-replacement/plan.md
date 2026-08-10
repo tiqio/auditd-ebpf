@@ -39,7 +39,9 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 
 **Constraints**: eBPF 热路径有界、不得 panic；内核 ABI 固定宽度且显式版本化；
 内核只做粗筛选和采集，用户态做精确规则解释；RingBuf 和队列均有硬上限；默认输出完整
-命令行参数但必须转义和标记截断；禁止依赖 C/libbpf/BCC 或未合并的 Rust CO-RE 方案
+且不脱敏的命令行参数，但必须转义和标记截断，并提供全局或规则级关闭控制；生产部署必须
+完成书面风险接受，限制 journal、文件、rsyslog 和远端日志读取权限，远端转发使用经认证的
+加密通道，并配置保留期；禁止依赖 C/libbpf/BCC 或未合并的 Rust CO-RE 方案
 
 **Scale/Scope**: 默认最多 4,096 条规范化规则、65,536 个并发 syscall 上下文、
 16 MiB RingBuf、64 MiB 初始用户队列和 512 MiB 队列硬上限；默认单事件最大 8 KiB，
@@ -52,7 +54,8 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 - [x] 使用 Rust 与 Aya；未引入替代 eBPF 框架
 - [x] 内核侧只执行有界粗筛选、字段采集和 RingBuf 投递，精确规则解释位于用户态
 - [x] 共享 ABI 包含 schema 版本、记录长度、固定宽度字段、规则版本和丢失计数
-- [x] 计划定义能力探测、规则文件权限、参数敏感性、脱敏、截断和内存硬上限
+- [x] 计划定义能力探测、规则文件权限、argv 原样输出与关闭控制、截断、日志访问控制、
+  加密转发、保留期、风险接受和内存硬上限
 - [x] 规划单元、属性、ABI、格式、特权内核、日志链路、稳定性和兼容矩阵测试
 - [x] 规格和基准协议已量化 CPU、吞吐、延迟、内存、正确性和事件丢失目标
 - [x] 公共 API、unsafe、ABI、验证器约束和内核兼容路径必须包含中文文档或安全注释
@@ -103,15 +106,20 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 | FR-011–FR-013 | AdaptiveQueue、HealthSnapshot、health-and-logging、check-rules |
 | FR-014–FR-016 | Benchmark entities、benchmark-protocol、quickstart comparison |
 | SR-001–SR-002 | Lifecycle/capabilities、可信规则文件校验、systemd sandbox |
-| SR-003–SR-005 | argv 截断/脱敏、转义、规则和内存容量硬上限 |
+| SR-003–SR-003a、SR-004–SR-005 | argv 原样输出与关闭控制、风险接受、日志访问控制、加密转发、截断、转义、规则和内存容量硬上限 |
 | SR-006–SR-007 | 健康状态机、gap 事件、基准隔离与清理 |
 | SC-001–SC-004 | parser/golden/privileged/logging 端到端测试 |
-| SC-005–SC-008 | benchmark protocol、内核矩阵和 24 小时稳定性测试 |
+| SC-005–SC-009 | benchmark protocol、内核矩阵、24 小时稳定性和生产安全策略验证 |
 
 ### Lifecycle and Privileges
 
 - 启动顺序为：验证配置和文件权限 → 探测内核能力 → 加载 maps/programs → 原子安装规则 →
   挂载 hooks → 启动消费者 → 输出 ready 状态。
+- 生产模式在加载 eBPF 前验证风险接受记录、journal 获准组、本地日志与导出文件权限、
+  rsyslog 目的地和经认证的加密转发配置；任一项缺失或无法验证时拒绝通过生产安全门禁，
+  且不得输出 `state=healthy` 的生产就绪声明。
+- 风险接受记录至少固定责任人、用途、获准读取主体、日志目的地、传输保护、访问策略、
+  保留期和事件响应要求；风险接受不得豁免访问控制、保留、加密或事件响应要求。
 - 服务使用受限 root/capability 边界。运行与规则重载保留 `CAP_BPF`、`CAP_PERFMON`；
   仅兼容探测需要时允许 `CAP_SYS_ADMIN`，启动后立即删除；不长期保留 `CAP_SYS_RESOURCE`。
 - `SIGHUP` 触发规则重载。新规则全部验证和填充完成后才切换 generation；失败保留旧版本。
@@ -210,7 +218,8 @@ benchmarks/
 - [x] 设计仅使用 Rust/Aya，并明确拒绝未合并 CO-RE 依赖
 - [x] 内核程序保持最小；路径规范化、规则顺序、输出和基准均在用户态
 - [x] ABI、事件格式、健康计数、规则版本和截断均有独立契约
-- [x] 权限、敏感 argv、资源硬上限、失效状态和失败关闭均可测试
+- [x] 权限、argv 原样输出与关闭控制、风险接受、日志访问与加密、资源硬上限、失效状态和
+  失败关闭均可测试
 - [x] 设计工件覆盖所有宪章测试层级及内核兼容矩阵
 - [x] 性能结论受正确性门禁、重复次数和完整报告约束
 - [x] 中文注释与安全文档要求已进入代码边界和评审门禁

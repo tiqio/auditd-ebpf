@@ -85,6 +85,25 @@ LimitMEMLOCK=infinity
 - 必须显式设置 action queue 和磁盘辅助队列；远端不可用不能反向阻塞服务 stdout。
 - journald/rsyslog 的 rate limit、丢弃和队列统计纳入端到端稳定性测试。
 
+## Unredacted argv Production Gate
+
+命中 exec 规则时默认输出不脱敏 argv。生产启用前必须完成并可验证以下门禁：
+
+- 存在已批准的风险接受记录，包含责任人、用途、获准读取主体、日志目的地、传输保护、
+  journal 或文件访问策略、保留期和事件响应要求。
+- systemd journal 仅允许 root 和获准审计管理员组读取；不得通过宽泛组成员资格或 world-readable
+  导出规避该限制。
+- 本地事件日志权限不得宽于 `0640`，离线导出或诊断包权限不得宽于 `0600`，所有者和组必须
+  与风险接受记录一致。
+- rsyslog 远端转发必须使用经认证的加密通道，并验证服务端身份；明文 TCP/UDP 不得作为
+  生产审计事件目的地。
+- 必须配置并验证 journal、本地文件、rsyslog 队列和远端接收端的保留期与删除流程。
+- 风险接受不得豁免访问控制、保留、加密或事件响应要求。
+
+任一检查失败或无法自动验证时，服务必须报告生产策略未通过，不得声明生产就绪；若配置
+允许非生产诊断运行，状态必须明确包含 `production_policy=failed`，且不得以 `healthy` 表示
+生产安全门禁合格。
+
 ## Alert Recommendations
 
 - 任意 `ring_lost`、`queue_lost` 或 `path_lost` 增量：立即告警。

@@ -191,3 +191,37 @@ sudo bpftool map show | grep auditd-ebpf || true
 ```
 
 期望：服务在超时内排空并输出 `final=yes` 状态；无活动程序、map 或 link 遗留。
+
+## 13. Validate argv Risk Acceptance and Log Access
+
+exec 规则默认在事件上限内原样输出 argv。生产启用前，创建并审批风险接受记录，至少写明
+责任人、用途、获准读取主体、日志目的地、传输保护、访问策略、保留期和事件响应要求。
+
+```bash
+# 验证 journal 读取者仅限 root 和获准审计管理员组。
+getent group systemd-journal
+getent group auditd-ebpf-auditors
+
+# 验证本地事件文件和离线导出权限。
+sudo stat -c '%a %U %G %n' /var/log/auditd-ebpf/events.log
+sudo find /var/lib/auditd-ebpf/exports -type f -printf '%m %u %g %p\n'
+
+# 验证 rsyslog 配置语法，并确认远端 action 使用经认证的加密传输。
+sudo rsyslogd -N1
+sudo grep -R --line-number -E 'StreamDriver|StreamDriverMode|StreamDriverAuthMode' \
+  /etc/rsyslog.conf /etc/rsyslog.d
+
+# 运行统一生产策略检查；任一强制项失败时返回退出码 9。
+sudo auditd-ebpf check-production \
+  --risk-acceptance-file /etc/auditd-ebpf/risk-acceptance.toml
+
+# 触发包含测试参数的 exec，确认默认原样输出并正确标记截断状态。
+/usr/bin/printf '%s\n' auditd-ebpf-argv-validation
+journalctl -u auditd-ebpf.service --since '-1 minute' --no-pager \
+  | grep 'auditd-ebpf-argv-validation'
+```
+
+期望：事件日志不宽于 `0640`，导出文件不宽于 `0600`；远端转发验证服务端身份且使用加密
+通道；journal 仅由获准主体读取；审计事件包含未脱敏测试参数。缺少风险接受记录、权限过宽、
+保留策略缺失或加密验证失败时，生产策略检查必须失败，服务不得声明生产就绪。风险接受不得
+用于豁免访问控制、保留、加密或事件响应要求。

@@ -168,7 +168,8 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX Performance optimization across all stories
 - [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
 - [ ] TXXX Security hardening
-- [ ] TXXX Verify verifier safety, capabilities, sensitive data and event-loss visibility
+- [ ] TXXX Verify verifier safety, capabilities, unredacted argv access controls and event-loss visibility
+- [ ] TXXX Validate production argv risk acceptance, journal/file permissions, encrypted forwarding and retention policy
 - [ ] TXXX [P] Complete Chinese API docs and safety/compatibility comments
 - [ ] TXXX Validate the declared kernel and architecture matrix
 - [ ] TXXX Run quickstart.md validation
