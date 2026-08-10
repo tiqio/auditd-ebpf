@@ -1,0 +1,13 @@
+name: privileged-kernel
+on: workflow_dispatch
+jobs:
+  kernel:
+    if: ${{ vars.HAS_PRIVILEGED_RUNNER == 'true' }}
+    strategy:
+      matrix:
+        kernel: ["5.15", "6.1", "6.6", "6.12"]
+    runs-on: [self-hosted, linux, x64, privileged]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo xtask test-kernel --kernel "${{ matrix.kernel }}"
+

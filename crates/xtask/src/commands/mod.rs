@@ -1,6 +1,7 @@
-use std::process::Command;
+use std::{path::Path, process::Command};
 
 use anyhow::{Context, bail};
+use aya::{Ebpf, programs::RawTracePoint};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -38,15 +39,38 @@ impl Cli {
         match self.command {
             XtaskCommand::BuildEbpf { release } => build_ebpf(release),
             XtaskCommand::Build { release } => cargo_build(release),
-            XtaskCommand::TestKernel { kernel } => {
-                println!(
-                    "特权测试驱动尚未实现，目标内核={}",
-                    kernel.as_deref().unwrap_or("host")
-                );
-                Ok(())
-            }
+            XtaskCommand::TestKernel { kernel } => test_kernel(kernel.as_deref()),
         }
     }
+}
+
+fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
+    let release = String::from_utf8(Command::new("uname").arg("-r").output()?.stdout)?;
+    let requested = kernel.unwrap_or("host");
+    if requested != "host" && !release.starts_with(requested) {
+        bail!(
+            "当前内核 {} 与请求 {} 不匹配；请在对应 VM/runner 执行",
+            release.trim(),
+            requested
+        );
+    }
+    build_ebpf(true)?;
+    let object = Path::new("target/bpfel-unknown-none/release/auditd-ebpf-ebpf");
+    let bytes = std::fs::read(object).with_context(|| format!("无法读取 {}", object.display()))?;
+    let mut bpf = Ebpf::load(&bytes).context("Aya 加载 smoke eBPF 对象失败")?;
+    let program: &mut RawTracePoint = bpf
+        .program_mut("auditd_sys_enter")
+        .context("对象缺少 auditd_sys_enter")?
+        .try_into()?;
+    program.load().context("加载 raw tracepoint 失败")?;
+    let link = program
+        .attach("sys_enter")
+        .context("挂载 raw_syscalls:sys_enter 失败")?;
+    program
+        .detach(link)
+        .context("清理 raw tracepoint link 失败")?;
+    println!("内核 smoke PASS kernel={}", release.trim());
+    Ok(())
 }
 
 fn cargo_build(release: bool) -> anyhow::Result<()> {

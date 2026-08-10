@@ -40,27 +40,27 @@
 
 ### Tests First
 
-- [ ] T010 [P] 为 `KernelEventHeader`、syscall/exec 记录的大小、对齐、版本和越界添加失败布局测试于 `crates/auditd-ebpf-common/tests/abi_layout.rs`
-- [ ] T011 [P] 为未知 schema、非法长度、截断记录和非对齐字节添加失败解码测试于 `crates/auditd-ebpf/tests/event_decode.rs`
-- [ ] T012 [P] 为 CLI 优先级、容量范围、`node_name`、生命周期文件路径、argv 全局/按 key 控制、风险接受 TOML schema/root 文件属性、策略摘要规范化、未知键和非法单位添加失败测试于 `crates/auditd-ebpf/tests/config_contract.rs`、`crates/auditd-ebpf/tests/risk_acceptance.rs`、`crates/auditd-ebpf/tests/policy_digest.rs`
-- [ ] T013 [P] 为 BTF、RingBuf、raw tracepoint、tracepoint 和 capability 探测结果添加 mock 测试于 `crates/auditd-ebpf/tests/capability_probe.rs`
-- [ ] T014 [P] 为自适应队列容量不变量、HostIdentity 冻结语义、LifecycleMarker clean/dirty 转换和健康状态转换添加失败测试于 `crates/auditd-ebpf/tests/foundation_state.rs`、`crates/auditd-ebpf/tests/host_identity.rs`、`crates/auditd-ebpf/tests/lifecycle_state.rs`
+- [X] T010 [P] 为 `KernelEventHeader`、syscall/exec 记录的大小、对齐、版本和越界添加失败布局测试于 `crates/auditd-ebpf-common/tests/abi_layout.rs`
+- [X] T011 [P] 为未知 schema、非法长度、截断记录和非对齐字节添加失败解码测试于 `crates/auditd-ebpf/tests/event_decode.rs`
+- [X] T012 [P] 为 CLI 优先级、容量范围、`node_name`、生命周期文件路径、argv 全局/按 key 控制、风险接受 TOML schema/root 文件属性、策略摘要规范化、未知键和非法单位添加失败测试于 `crates/auditd-ebpf/tests/config_contract.rs`、`crates/auditd-ebpf/tests/risk_acceptance.rs`、`crates/auditd-ebpf/tests/policy_digest.rs`
+- [X] T013 [P] 为 BTF、RingBuf、raw tracepoint、tracepoint 和 capability 探测结果添加 mock 测试于 `crates/auditd-ebpf/tests/capability_probe.rs`
+- [X] T014 [P] 为自适应队列容量不变量、HostIdentity 冻结语义、LifecycleMarker clean/dirty 转换和健康状态转换添加失败测试于 `crates/auditd-ebpf/tests/foundation_state.rs`、`crates/auditd-ebpf/tests/host_identity.rs`、`crates/auditd-ebpf/tests/lifecycle_state.rs`
 
 ### Shared Implementation
 
-- [ ] T015 实现 `#[repr(C)]` 固定宽度 ABI、schema 常量、记录类型和中文安全文档于 `crates/auditd-ebpf-common/src/event.rs`、`crates/auditd-ebpf-common/src/lib.rs`
-- [ ] T016 实现用户态记录长度校验、无未对齐引用的安全解码和错误类型于 `crates/auditd-ebpf/src/collector/decode.rs`、`crates/auditd-ebpf/src/collector/mod.rs`
-- [ ] T017 实现 TOML/环境变量/CLI 配置、`node_name`/生命周期路径、argv 全局/按 key 输出策略、风险接受记录模型、64 KiB 上限、root/防符号链接文件读取和 version 1 固定顺序 SHA-256 摘要基础于 `crates/auditd-ebpf/src/config/model.rs`、`crates/auditd-ebpf/src/config/load.rs`、`crates/auditd-ebpf/src/policy/model.rs`、`crates/auditd-ebpf/src/policy/risk_acceptance.rs`、`crates/auditd-ebpf/src/policy/digest.rs`
-- [ ] T018 实现 `run`、`check-rules`、`check-production`、`print-policy-digest`、`print-capabilities`、`benchmark-info` 命令与退出码骨架于 `crates/auditd-ebpf/src/cli.rs`、`crates/auditd-ebpf/src/commands/mod.rs`、`crates/auditd-ebpf/src/main.rs`
-- [ ] T019 实现内核版本、x86_64、BTF、BPF syscall、RingBuf、raw tracepoint、tracepoint 和 capabilities 探测于 `crates/auditd-ebpf/src/capabilities.rs`
-- [ ] T020 实现 eBPF map、每 CPU 基础计数器、活动 generation 和空程序骨架于 `crates/auditd-ebpf-ebpf/src/maps.rs`、`crates/auditd-ebpf-ebpf/src/programs/mod.rs`、`crates/auditd-ebpf-ebpf/src/main.rs`
-- [ ] T021 实现 Aya 对象加载、map 获取、程序 attach/link 生命周期和失败清理于 `crates/auditd-ebpf/src/loader.rs`
-- [ ] T022 实现按字节计量、硬上限和无界增长保护的 `AdaptiveQueue` 基础类型于 `crates/auditd-ebpf/src/output/adaptive_queue.rs`、`crates/auditd-ebpf/src/output/mod.rs`
-- [ ] T023 实现 `Starting/Healthy/Degraded/Unhealthy/Stopping` 状态机、`unclean_shutdown_detected_total` 和单调计数模型于 `crates/auditd-ebpf/src/health/state.rs`、`crates/auditd-ebpf/src/health/counters.rs`、`crates/auditd-ebpf/src/health/mod.rs`
-- [ ] T024 实现 PID+启动时间身份、TID 路径上下文、root/mount namespace/mount epoch 边界、ABI 架构和有界进程缓存基础类型于 `crates/auditd-ebpf/src/process_cache/model.rs`、`crates/auditd-ebpf/src/process_cache/mod.rs`
-- [ ] T025 创建 QEMU/真实内核特权测试驱动、镜像配置和清理检查于 `crates/xtask/src/commands/test_kernel.rs`、`tests/vm/kernels.toml`、`tests/privileged/smoke.sh`
-- [ ] T026 配置 5.15/6.1/6.6/6.12 特权自托管 CI job 和缺少 runner 时的明确跳过报告于 `.github/workflows/privileged.yml`
-- [ ] T027 运行共享 ABI、配置、能力、加载/卸载 smoke test 和全部 Foundational 门禁，并创建基础里程碑 commit，涉及 `crates/auditd-ebpf-common/`、`crates/auditd-ebpf/`、`crates/auditd-ebpf-ebpf/`、`tests/`
+- [X] T015 实现 `#[repr(C)]` 固定宽度 ABI、schema 常量、记录类型和中文安全文档于 `crates/auditd-ebpf-common/src/event.rs`、`crates/auditd-ebpf-common/src/lib.rs`
+- [X] T016 实现用户态记录长度校验、无未对齐引用的安全解码和错误类型于 `crates/auditd-ebpf/src/collector/decode.rs`、`crates/auditd-ebpf/src/collector/mod.rs`
+- [X] T017 实现 TOML/环境变量/CLI 配置、`node_name`/生命周期路径、argv 全局/按 key 输出策略、风险接受记录模型、64 KiB 上限、root/防符号链接文件读取和 version 1 固定顺序 SHA-256 摘要基础于 `crates/auditd-ebpf/src/config/model.rs`、`crates/auditd-ebpf/src/config/load.rs`、`crates/auditd-ebpf/src/policy/model.rs`、`crates/auditd-ebpf/src/policy/risk_acceptance.rs`、`crates/auditd-ebpf/src/policy/digest.rs`
+- [X] T018 实现 `run`、`check-rules`、`check-production`、`print-policy-digest`、`print-capabilities`、`benchmark-info` 命令与退出码骨架于 `crates/auditd-ebpf/src/cli.rs`、`crates/auditd-ebpf/src/commands/mod.rs`、`crates/auditd-ebpf/src/main.rs`
+- [X] T019 实现内核版本、x86_64、BTF、BPF syscall、RingBuf、raw tracepoint、tracepoint 和 capabilities 探测于 `crates/auditd-ebpf/src/capabilities.rs`
+- [X] T020 实现 eBPF map、每 CPU 基础计数器、活动 generation 和空程序骨架于 `crates/auditd-ebpf-ebpf/src/maps.rs`、`crates/auditd-ebpf-ebpf/src/programs/mod.rs`、`crates/auditd-ebpf-ebpf/src/main.rs`
+- [X] T021 实现 Aya 对象加载、map 获取、程序 attach/link 生命周期和失败清理于 `crates/auditd-ebpf/src/loader.rs`
+- [X] T022 实现按字节计量、硬上限和无界增长保护的 `AdaptiveQueue` 基础类型于 `crates/auditd-ebpf/src/output/adaptive_queue.rs`、`crates/auditd-ebpf/src/output/mod.rs`
+- [X] T023 实现 `Starting/Healthy/Degraded/Unhealthy/Stopping` 状态机、`unclean_shutdown_detected_total` 和单调计数模型于 `crates/auditd-ebpf/src/health/state.rs`、`crates/auditd-ebpf/src/health/counters.rs`、`crates/auditd-ebpf/src/health/mod.rs`
+- [X] T024 实现 PID+启动时间身份、TID 路径上下文、root/mount namespace/mount epoch 边界、ABI 架构和有界进程缓存基础类型于 `crates/auditd-ebpf/src/process_cache/model.rs`、`crates/auditd-ebpf/src/process_cache/mod.rs`
+- [X] T025 创建 QEMU/真实内核特权测试驱动、镜像配置和清理检查于 `crates/xtask/src/commands/test_kernel.rs`、`tests/vm/kernels.toml`、`tests/privileged/smoke.sh`
+- [X] T026 配置 5.15/6.1/6.6/6.12 特权自托管 CI job 和缺少 runner 时的明确跳过报告于 `.github/workflows/privileged.yml`
+- [X] T027 运行共享 ABI、配置、能力、加载/卸载 smoke test 和全部 Foundational 门禁，并创建基础里程碑 commit，涉及 `crates/auditd-ebpf-common/`、`crates/auditd-ebpf/`、`crates/auditd-ebpf-ebpf/`、`tests/`
 
 **Checkpoint**: workspace 可构建；空 eBPF 程序可在受支持内核加载、挂载和清理；共享基础测试通过。
 
