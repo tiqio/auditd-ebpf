@@ -1,0 +1,78 @@
+(* auditd-ebpf v1 规则子集。输入按字节解析，换行支持 LF 或 CRLF。 *)
+
+rule_file      = { spacing, [ comment | syscall_rule | watch_rule ], line_end } ;
+comment        = "#", { any_non_line_end } ;
+
+syscall_rule   = append_action, one_or_more_terms ;
+append_action  = "-a", required_space, "always,exit" ;
+one_or_more_terms = required_space, term, { required_space, term } ;
+term           = syscall_term | field_term | key_term ;
+
+syscall_term   = "-S", required_space, syscall_list ;
+syscall_list   = syscall_name, { ",", syscall_name } ;
+syscall_name   = identifier | unsigned_integer ;
+
+field_term     = "-F", required_space, field_expression ;
+field_expression = arch_field
+                 | uid_field
+                 | gid_field
+                 | success_field
+                 | path_field
+                 | dir_field
+                 | perm_field
+                 | key_field ;
+
+arch_field     = "arch", equality_operator, ( "b64" | "b32" ) ;
+uid_field      = ( "uid" | "euid" ), numeric_operator, unsigned_integer ;
+gid_field      = ( "gid" | "egid" ), numeric_operator, unsigned_integer ;
+success_field  = "success", equality_operator, ( "yes" | "no" | "1" | "0" ) ;
+path_field     = "path", equality_operator, absolute_path ;
+dir_field      = "dir", equality_operator, absolute_path ;
+perm_field     = "perm", equality_operator, permission_set ;
+key_field      = "key", equality_operator, key_value ;
+
+key_term       = "-k", required_space, key_value ;
+
+watch_rule     = "-w", required_space, absolute_path,
+                 [ required_space, "-p", required_space, permission_set ],
+                 required_space, ( key_term | field_key_term ) ;
+field_key_term = "-F", required_space, key_field ;
+
+permission_set = permission, { permission } ;
+permission     = "r" | "w" | "x" | "a" ;
+numeric_operator = "=" | "!=" | "<" | "<=" | ">" | ">=" ;
+equality_operator = "=" | "!=" ;
+
+absolute_path  = "/", { path_byte } ;
+key_value      = key_byte, { key_byte } ;
+identifier     = identifier_start, { identifier_continue } ;
+identifier_start = letter | "_" ;
+identifier_continue = identifier_start | digit ;
+unsigned_integer = digit, { digit } ;
+
+spacing        = { " " | "\t" } ;
+required_space = ( " " | "\t" ), spacing ;
+line_end       = "\n" | "\r\n" | end_of_file ;
+
+letter         = ? ASCII A-Z or a-z ? ;
+digit          = ? ASCII 0-9 ? ;
+path_byte      = ? printable non-space byte except NUL, CR, LF and "#" ? ;
+key_byte       = ? printable non-space byte except NUL, CR and LF ? ;
+any_non_line_end = ? any byte except CR and LF ? ;
+end_of_file    = ? physical end of input ? ;
+
+(* 语义约束 *)
+(* 1. key_value 为 1–31 bytes，禁止 NUL、CR、LF 和其他控制字符。 *)
+(* 2. absolute_path 必须词法规范化，禁止 NUL、CR、LF、空组件、`.` 和 `..`。 *)
+(* 3. permission_set 去重后必须非空，只允许 r/w/x/a。 *)
+(* 4. path 与 dir 互斥；perm 必须与 path/dir 或 watch_rule 同时出现。 *)
+(* 5. 同一规则可重复 -S；解析后合并并保持首次出现顺序。 *)
+(* 6. 同一字段重复且条件冲突时规则无效。 *)
+(* 7. 不支持的选项、字段、action、list 或操作符导致整个候选规则集拒绝。 *)
+(* 8. 文件按 C locale 文件名字节序排序，规则按出现顺序执行 first-match。 *)
+
+(* 明确不支持 *)
+(* -A、-D、-d、-e、-f、-r、-b、-c、-C、-q、-t、-l、-R、-W、-i *)
+(* never/task/user/exclude/filesystem/io_uring lists *)
+(* auid、ses、obj_uid、obj_gid、exe、fstype、msgtype 等未列字段 *)
+(* inter-field comparisons 和 bit-mask operators *)
