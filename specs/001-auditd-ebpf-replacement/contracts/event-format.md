@@ -7,7 +7,9 @@
 - 最大输出行 16 KiB。超过时按字段优先级截断，并设置 `truncated=yes` 与字段级原因。
 - stdout 成功写入只表示交付到服务日志管道，不表示 rsyslog 远端已持久化。
 - 命中 exec 规则时，`a0`–`a31` 在事件上限内默认原样输出，不进行脱敏、猜测或删除；
-  全局或规则级 argv 关闭控制启用时不得输出这些字段。
+  全局或规则级 argv 关闭控制启用时不得输出这些字段，但内核仍采集参数并提交 RingBuf。
+- exec 事件必须输出 `argv_output=emitted|suppressed`。`suppressed` 时仍输出 `argc`、
+  `argv_truncated` 和其他 exec 元数据，但禁止输出任意 `aN` 参数字段。
 - stdout、journal、rsyslog、本地文件和远端消费者必须把记录视为可能包含凭据、令牌、
   密钥与个人数据的敏感审计数据，并执行生产访问控制和保留策略。
 
@@ -53,16 +55,23 @@ escape = "\\" ("\\" / DQUOTE / "n" / "r" / "t" / "x" HEXDIG HEXDIG)
 20. `exe`
 21. `path`
 22. `perm`
-23. `argc`
-24. `a0` … `a31`
-25. `argv_truncated`
-26. `path_confidence`
-27. `truncated`
+23. `argv_output`
+24. `argc`
+25. `a0` … `a31`
+26. `argv_truncated`
+27. `path_confidence`
+28. `truncated`
 
 示例：
 
 ```text
-type=AUDITD_EBPF msg=audit(1786352400.123:42) schema=1 event_id="550e8400-e29b-41d4-a716-446655440000:42" rule_version=184467 rule_id=7 key="exec" arch=c000003e syscall=execve operation=exec success=yes exit=0 pid=1200 ppid=1180 uid=1000 gid=1000 euid=1000 egid=1000 comm="bash" exe="/usr/bin/id" path="/usr/bin/id" argc=2 a0="id" a1="-u" argv_truncated=no path_confidence=exact truncated=no
+type=AUDITD_EBPF msg=audit(1786352400.123:42) schema=1 event_id="550e8400-e29b-41d4-a716-446655440000:42" rule_version=184467 rule_id=7 key="exec" arch=c000003e syscall=execve operation=exec success=yes exit=0 pid=1200 ppid=1180 uid=1000 gid=1000 euid=1000 egid=1000 comm="bash" exe="/usr/bin/id" path="/usr/bin/id" argv_output=emitted argc=2 a0="id" a1="-u" argv_truncated=no path_confidence=exact truncated=no
+```
+
+抑制示例：
+
+```text
+type=AUDITD_EBPF msg=audit(1786352400.124:43) schema=1 event_id="550e8400-e29b-41d4-a716-446655440000:43" rule_version=184467 rule_id=7 key="exec" arch=c000003e syscall=execve operation=exec success=yes exit=0 pid=1201 ppid=1180 uid=1000 gid=1000 euid=1000 egid=1000 comm="bash" exe="/usr/bin/id" path="/usr/bin/id" argv_output=suppressed argc=2 argv_truncated=no path_confidence=exact truncated=no
 ```
 
 ## Gap Event
@@ -84,6 +93,7 @@ type=AUDITD_EBPF_GAP msg=audit(1786352401.000:43) schema=1 event_id="...:43" rea
 `level code component message rule_file rule_line errno` 中适用字段。
 
 诊断不得使用 `type=AUDITD_EBPF`，以免被审计事件过滤器误收集。
+诊断、状态和 gap 记录不得包含被采集的 argv 内容。
 
 ## Compatibility
 

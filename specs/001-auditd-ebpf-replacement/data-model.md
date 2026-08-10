@@ -50,8 +50,9 @@
 - `perm` 必须与 path/dir 或 legacy watch 同时出现。
 - 不支持字段或操作符使整个候选 RuleSet 验证失败。
 - 同一事件按 `rule_id` 升序 first-match，不合并多个 key。
-- exec 规则的 `argv_output` 先应用规则级配置，再回退全局 `exec_argv_enabled=true`；关闭时仍输出
-  exec 元数据，但不读取或输出 `a0`–`a31`。
+- exec 规则的 `argv_output` 先应用按 key 的规则级配置，再回退全局 `exec_argv_enabled=true`。
+  只要某个 key 配置了规则级覆盖，候选 RuleSet 中该 key 的 exec 规则必须恰好一条；未配置
+  覆盖的重复 key 不受此约束。`Disabled` 只抑制用户态输出，内核仍采集 argv。
 
 ## RuleSet
 
@@ -87,7 +88,7 @@ Active + reload failure → Active（旧版本不变）
 | `b32_syscall_bitmap` | bitset | 所有 B32 syscall 并集 |
 | `identity_prefilters` | bounded list | 可安全下推的 uid/gid 粗过滤 |
 | `path_syscall_bitmap` | bitset | 需要捕获路径参数的 syscall |
-| `exec_capture_enabled` | bool | 是否需要 argv |
+| `exec_capture_enabled` | bool | RuleSet 含任意 exec 规则时为 true，不受输出抑制策略影响 |
 | `process_arch_map` | map<tgid, arch> | 用户态维护的 B64/B32 提示；未知时不过滤 |
 
 ## KernelEventHeader
@@ -173,7 +174,7 @@ pending exec 默认最多 65,536 项，超时 30 秒；缺少 attempt/result 必
 ```text
 /proc bootstrap → Running
 fork(parent) → Running(child inherits cwd/fd references)
-exec success → Running(exe/argv 更新)
+exec success → Running(exe 更新；不缓存 argv)
 chdir/fchdir success → Running(cwd 更新)
 open/dup/close success → Running(fd_table 更新)
 exit → Exited → 缓冲期后淘汰
@@ -194,7 +195,8 @@ exit → Exited → 缓冲期后淘汰
 | `success/exit` | bool/i64 | 调用结果 |
 | `process` | ProcessIdentity fields | pid/ppid/uid/gid/comm/exe |
 | `path` | absolute path? | 解析成功时提供 |
-| `argv` | list<bytes> | exec 事件默认输出 |
+| `argv_output` | enum | `Emitted/Suppressed`，由全局或 first-match 规则 key 决定 |
+| `argv` | list<bytes> | exec 采集参数；仅 `Emitted` 时交给格式器，随后释放 |
 | `truncation` | flags | 字段级截断 |
 | `integrity` | enum | complete/truncated/uncertain |
 
@@ -235,28 +237,44 @@ exit → Exited → 缓冲期后淘汰
 | `queue_dropped` | u64 | 用户队列丢失 |
 | `path_resolution_failed` | u64 | 路径缺口 |
 | `parse_failed/output_failed` | u64 | 用户态错误 |
+| `exec_argv_captured` | u64 | 内核成功提交包含 argv 的 ExecAttempt 数量 |
+| `exec_argv_suppressed` | u64 | first-match 后未输出 argv 的 exec 事件数量 |
 | `queue_used/limit/max_bytes` | usize | 背压状态 |
 | `last_error` | code + timestamp | 最近错误 |
 | `production_policy` | enum | `NotRequested/Passed/Failed` |
 
 ## ProductionPolicy
 
-表示启用默认原样 argv 输出时的生产安全门禁。风险接受记录只能确认风险取舍，不能关闭强制
-访问控制、保留、加密或事件响应检查。
+表示默认原样 argv 输出及其用户态抑制控制的生产安全门禁。风险接受记录只能确认风险取舍，
+不能关闭强制访问控制、保留、加密或事件响应检查。
 
 | Field | Type | Required | Validation |
 |---|---|---:|---|
 | `deployment_mode` | enum | yes | `NonProduction/Production` |
 | `risk_acceptance_path` | absolute path | production | root 所有，group/other 不得可写 |
+| `record_version` | u16 | production | 首版固定为 1，未知主版本拒绝 |
+| `approval_id` | non-empty string | production | 组织审批系统的可追踪标识 |
+| `approver` | non-empty string | production | 明确批准人或批准团队 |
 | `owner` | non-empty string | production | 明确责任人或责任团队 |
+| `approved_at` | timestamp | production | 带时区的 RFC 3339 时间；不推导到期时间 |
 | `purpose` | non-empty string | production | 记录采集和使用目的 |
 | `approved_readers` | bounded list | production | root 与获准审计管理员组，至少一项 |
-| `destinations` | bounded list | production | journal、本地文件、rsyslog 或远端接收端 |
-| `transport_protection` | enum | remote | 经认证加密及服务端身份验证方式 |
-| `retention_days` | u32 | production | 1–3,650，并与全部目的地一致 |
+| `destinations` | list<DestinationPolicy> | production | 每个 journal、文件、rsyslog 或远端目的地唯一 |
 | `incident_response` | non-empty string | production | 暴露、越权读取和转发失败处置要求 |
+| `policy_digest_version` | u16 | production | 首版固定为 1 |
+| `policy_digest` | 32 bytes | production | 当前有效日志安全策略规范化后 SHA-256 |
 | `validated_at` | timestamp | yes | 本次启动或检查时间 |
 | `validation_errors` | bounded list | no | 每项包含稳定错误码和可操作消息 |
+
+`DestinationPolicy` 包含稳定 `id`、`kind`、规范化 `target`、`retention_days`（1–3,650）、
+本地 `owner/group/mode`、`transport_mode`、可选 `peer_identity` 和 `trust_fingerprint`。远端
+目的地必须提供经认证加密及服务端身份验证；本地目的地必须显式使用 `local-only` 和不宽于
+契约要求的访问模式。
+
+风险接受记录无 `expires_at` 字段且不因时间自动失效。argv 全局/按 key 输出策略、获准读取主体、
+日志目的地、传输认证或逐目的地保留期变化时，规范化摘要必须变化并使旧审批失效。原始 argv
+只能存在于 RingBuf 记录、pending exec 和当前规则求值对象；不得进入进程缓存、诊断、状态、
+gap 或被抑制事件的输出队列。
 
 ### Health State Transitions
 

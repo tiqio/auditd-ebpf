@@ -214,3 +214,40 @@ inactive generation 填充后原子切换，失败保留旧 generation。
 
 - Linux perf-stat manual: https://man7.org/linux/man-pages/man1/perf-stat.1.html
 - auditd configuration source/manuals: https://github.com/linux-audit/audit-userspace
+
+## 11. argv 输出抑制与生产风险接受
+
+**Decision**: 匹配 exec 候选事件时，eBPF 始终按既定 32×192 字节上限采集 argv 并提交
+RingBuf；全局和规则级控制只决定用户态 first-match 后是否把 `a0`–`a31` 写入审计输出。
+规则级控制按 audit `key` 匹配；仅当某个 key 配置覆盖时，候选 RuleSet 中对应 exec key
+必须唯一，否则拒绝整套候选规则。抑制输出的事件仍保留 argc、截断状态和
+`argv_output=suppressed`，但 stdout、诊断、状态、gap 和进程缓存均不得包含参数内容。
+
+生产风险接受使用 root 所有且 group/other 不可写的本地 TOML。记录包含审批人、责任人、
+审批时间、用途、获准读取主体、目的地、传输保护、保留期、事件响应要求和
+`sha256:<hex>` 策略摘要。摘要版本 1 对有效 argv 输出策略、读取者、目的地、传输身份验证
+和逐目的地保留期生成固定顺序 UTF-8 `key=value` 行后计算 SHA-256。审批不设固定到期；
+摘要变化、必填字段缺失或文件可信属性失效时必须重新审批。
+
+**Rationale**: 精确 first-match 和规则级 key 覆盖位于用户态；统一采集可避免把完整规则解释
+复制进内核，并保持固定 ABI 和有界验证器路径。Linux BPF RingBuf 的 reserve/submit 模型允许
+按事件一次性提交有界变长记录；用户态必须在匹配后、进入输出队列前应用抑制，避免被抑制的
+argv 进入日志链路。audit key 是管理员已有的规则标签；覆盖时强制唯一消除同 key 多规则的
+歧义。root 文件属性、确定性摘要和实际日志链路检查共同证明审批仍对应当前策略；无固定到期
+是本轮明确产品决策，但任何策略变化都会使旧审批失效。
+
+**Alternatives considered**:
+
+- argv 关闭后停止内核读取：拒绝，用户明确选择仍采集并仅抑制输出。
+- 内核按规则 key 决定是否采集：拒绝，会把精确规则策略和 first-match 语义复制到内核。
+- 按生成 rule_id 或文件行号配置覆盖：拒绝，规则插入或编辑后标识不稳定。
+- 风险记录数字签名或外部 GRC 在线审批：首版拒绝，增加密钥或外部可用性依赖。
+- 风险记录固定到期：拒绝，用户选择策略摘要不变时永久有效。
+
+**Sources**:
+
+- Linux BPF Ring Buffer: https://docs.kernel.org/bpf/ringbuf.html
+- Aya RingBuf API: https://docs.rs/aya/0.14.0/aya/maps/ring_buf/struct.RingBuf.html
+- auditctl rule keys: https://man7.org/linux/man-pages/man8/auditctl.8.html
+- systemd journal access: https://www.freedesktop.org/software/systemd/man/latest/systemd-journald.service.html
+- rsyslog TLS authentication: https://www.rsyslog.com/doc/tutorials/tls_cert_summary.html

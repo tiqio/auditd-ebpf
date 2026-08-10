@@ -9,7 +9,9 @@
 实现一个以 Rust 和 Aya 构建的 Linux 审计代理。用户态读取并验证常用 audit 规则子集，
 将规则编译为内核粗筛选表；Aya eBPF 程序通过稳定 raw tracepoint/tracepoint 捕获系统调用、
 进程执行和路径参数，使用版本化共享 ABI 写入 RingBuf。用户态完成路径规范化、精确规则匹配、
-`key=value` 单行格式化、stdout 输出、健康状态和动态有界队列管理。项目同时提供与传统
+按唯一规则 key 应用 argv 输出策略、`key=value` 单行格式化、stdout 输出、健康状态和动态
+有界队列管理。生产模式使用 root 可信 TOML 风险接受记录和版本化策略摘要验证实际日志链路。
+项目同时提供与传统
 auditd 的正确性优先、同机重复对照基准，只有满足规格阈值时才发布性能提升结论。
 
 ## Technical Context
@@ -22,7 +24,8 @@ bpf-linker 0.10.4、clap 4、tracing 0.1、tracing-subscriber 0.3、signal-hook 
 libc 0.2；测试使用 proptest 1，基准使用自研 Rust workload 驱动与 Linux perf
 
 **Storage**: 不使用数据库；读取 `/etc/audit/rules.d/*.rules` 或
-`/etc/audit/audit.rules`，运行状态位于有界内存映射和队列，基准原始结果写入版本化 JSON/Markdown
+`/etc/audit/audit.rules` 和 `/etc/auditd-ebpf/risk-acceptance.toml`；运行状态位于有界内存
+映射和队列，基准原始结果写入版本化 JSON/Markdown
 
 **Testing**: `cargo test`、规则解析属性测试、共享 ABI 布局测试、格式契约 golden test、
 特权 QEMU/真实内核加载测试、systemd/journald/rsyslog 集成测试、24 小时稳定性和同机对照基准
@@ -39,9 +42,10 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 
 **Constraints**: eBPF 热路径有界、不得 panic；内核 ABI 固定宽度且显式版本化；
 内核只做粗筛选和采集，用户态做精确规则解释；RingBuf 和队列均有硬上限；默认输出完整
-且不脱敏的命令行参数，但必须转义和标记截断，并提供全局或规则级关闭控制；生产部署必须
-完成书面风险接受，限制 journal、文件、rsyslog 和远端日志读取权限，远端转发使用经认证的
-加密通道，并配置保留期；禁止依赖 C/libbpf/BCC 或未合并的 Rust CO-RE 方案
+且不脱敏的命令行参数，但必须转义和标记截断；全局或按唯一规则 key 的关闭控制仅抑制
+用户态输出，内核仍有界采集并提交 RingBuf；生产部署必须完成 root 可信 TOML 风险接受，
+审批绑定版本化有效策略摘要且无固定到期，并限制 journal、文件、rsyslog 和远端日志读取权限，
+远端转发使用经认证的加密通道且配置保留期；禁止依赖 C/libbpf/BCC 或未合并的 Rust CO-RE 方案
 
 **Scale/Scope**: 默认最多 4,096 条规范化规则、65,536 个并发 syscall 上下文、
 16 MiB RingBuf、64 MiB 初始用户队列和 512 MiB 队列硬上限；默认单事件最大 8 KiB，
@@ -55,7 +59,7 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 - [x] 内核侧只执行有界粗筛选、字段采集和 RingBuf 投递，精确规则解释位于用户态
 - [x] 共享 ABI 包含 schema 版本、记录长度、固定宽度字段、规则版本和丢失计数
 - [x] 计划定义能力探测、规则文件权限、argv 原样输出与关闭控制、截断、日志访问控制、
-  加密转发、保留期、风险接受和内存硬上限
+  加密转发、保留期、root 可信风险接受、策略摘要和内存硬上限
 - [x] 规划单元、属性、ABI、格式、特权内核、日志链路、稳定性和兼容矩阵测试
 - [x] 规格和基准协议已量化 CPU、吞吐、延迟、内存、正确性和事件丢失目标
 - [x] 公共 API、unsafe、ABI、验证器约束和内核兼容路径必须包含中文文档或安全注释
@@ -76,10 +80,12 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 4. `raw_syscalls:sys_enter/sys_exit` 采集 syscall 参数与结果；`sched_process_exec/fork/exit`
    维护执行事件和进程缓存。exec argv 在 sys_enter 立即发送 `ExecAttempt`，成功由
    `sched_process_exec`、失败由 sys_exit 发送 `ExecResult`，用户态按 PID 和 attempt ID 关联。
-   只读取稳定 tracepoint 上下文和用户指针，不直接解引用不稳定内核结构。
+   即使全局或规则级配置关闭 argv 输出，内核仍按相同上限采集并提交参数；只读取稳定
+   tracepoint 上下文和用户指针，不直接解引用不稳定内核结构。
 5. eBPF 通过 RingBuf 发送版本化 `KernelEvent`；预留失败时增加每 CPU 丢失计数。
-6. 收集线程立即复制记录到按字节计量的用户态自适应队列，写线程格式化为单行
-   audit 风格 `key=value` 并写入 stdout。
+6. 收集线程解码后由规则引擎执行 first-match，再按全局或唯一规则 key 决定 argv 输出策略；
+   被抑制的参数不得进入 stdout、诊断、状态、gap 或进程缓存。随后将可输出事件复制到按字节
+   计量的用户态自适应队列，写线程格式化为单行 audit 风格 `key=value` 并写入 stdout。
 7. 用户队列从 64 MiB 按高水位倍增到 512 MiB；达到硬上限后丢弃新事件、计数并进入 degraded。
 8. 诊断和周期健康记录写入 stderr；systemd/journald 负责采集，rsyslog 负责持久化和转发。
 
@@ -87,6 +93,9 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 
 - 规则文件使用 C locale 的字节顺序排序；文件内保持原始顺序。首版仅支持 `always,exit`，
   同一事件命中多条规则时采用 first-match，并输出该规则 key。
+- 规则级 argv 覆盖按 audit key 配置。仅当某个 key 存在覆盖时，该 key 在候选 exec 规则中
+  必须唯一；冲突时拒绝整套候选 RuleSet 并报告所有来源位置。未配置覆盖的重复 key 保持
+  audit 兼容，不额外拒绝。
 - `path=` 和 `dir=` 仅接受绝对、规范化的规则路径。内核捕获路径型 syscall 的原始路径、
   `dirfd` 和调用参数，用户态结合进程 cwd/fd 缓存生成规范化绝对路径。
 - 进程缓存通过服务启动时扫描 `/proc` 初始化，并通过 fork、exec、chdir、fchdir、open、dup、
@@ -106,7 +115,7 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 | FR-011–FR-013 | AdaptiveQueue、HealthSnapshot、health-and-logging、check-rules |
 | FR-014–FR-016 | Benchmark entities、benchmark-protocol、quickstart comparison |
 | SR-001–SR-002 | Lifecycle/capabilities、可信规则文件校验、systemd sandbox |
-| SR-003–SR-003a、SR-004–SR-005 | argv 原样输出与关闭控制、风险接受、日志访问控制、加密转发、截断、转义、规则和内存容量硬上限 |
+| SR-003–SR-003a、SR-004–SR-005 | argv 原样输出与用户态抑制、唯一 key 覆盖、root 可信风险接受、策略摘要、日志访问控制、加密转发、截断、转义、规则和内存容量硬上限 |
 | SR-006–SR-007 | 健康状态机、gap 事件、基准隔离与清理 |
 | SC-001–SC-004 | parser/golden/privileged/logging 端到端测试 |
 | SC-005–SC-009 | benchmark protocol、内核矩阵、24 小时稳定性和生产安全策略验证 |
@@ -118,14 +127,16 @@ tracepoint 和 RingBuf。首版不要求 BPF LSM；服务加载时探测能力�
 - 生产模式在加载 eBPF 前验证风险接受记录、journal 获准组、本地日志与导出文件权限、
   rsyslog 目的地和经认证的加密转发配置；任一项缺失或无法验证时拒绝通过生产安全门禁，
   且不得输出 `state=healthy` 的生产就绪声明。
-- 风险接受记录至少固定责任人、用途、获准读取主体、日志目的地、传输保护、访问策略、
-  保留期和事件响应要求；风险接受不得豁免访问控制、保留、加密或事件响应要求。
+- 风险接受记录使用 root 所有且 group/other 不可写的本地 TOML，至少固定审批人、责任人、
+  审批时间、用途、获准读取主体、日志目的地、传输保护、访问策略、保留期、事件响应要求和
+  `policy_digest_version=1` 的 SHA-256 摘要。审批无固定到期；摘要不匹配或文件失去可信属性时
+  必须重新审批。风险接受不得豁免访问控制、保留、加密或事件响应要求。
 - 服务使用受限 root/capability 边界。运行与规则重载保留 `CAP_BPF`、`CAP_PERFMON`；
   仅兼容探测需要时允许 `CAP_SYS_ADMIN`，启动后立即删除；不长期保留 `CAP_SYS_RESOURCE`。
 - `SIGHUP` 触发规则重载。新规则全部验证和填充完成后才切换 generation；失败保留旧版本。
 - `SIGTERM/SIGINT` 停止新事件、排空用户队列至超时、输出最终计数、分离 links 并退出。
-- 不提供网络监听端口或常驻控制 socket；`--check-rules`、`--print-capabilities` 和
-  `--benchmark-info` 为只读 CLI 操作。
+- 不提供网络监听端口或常驻控制 socket；`check-rules`、`check-production`、
+  `print-policy-digest`、`print-capabilities` 和 `benchmark-info` 为只读 CLI 操作。
 
 ## Project Structure
 
@@ -142,7 +153,8 @@ specs/001-auditd-ebpf-replacement/
 │   ├── benchmark-protocol.md
 │   ├── cli.md
 │   ├── event-format.md
-│   └── health-and-logging.md
+│   ├── health-and-logging.md
+│   └── risk-acceptance.md
 └── tasks.md
 ```
 
@@ -199,6 +211,7 @@ benchmarks/
 - [x] 定义规则子集、路径解析边界、first-match 与失败关闭语义
 - [x] 定义 RingBuf、每 CPU 计数、自适应用户队列和健康状态策略
 - [x] 定义 stdout/journald/rsyslog 日志契约
+- [x] 定义 argv 用户态抑制、唯一 key 覆盖和生产风险接受策略摘要
 - [x] 定义 auditd 公平基准、正确性前置门禁和结果发布规则
 
 详细结论见 [research.md](research.md)。
@@ -210,6 +223,7 @@ benchmarks/
 - [x] [contracts/event-format.md](contracts/event-format.md) 固定单行输出和转义
 - [x] [contracts/cli.md](contracts/cli.md) 固定服务 CLI、退出码和信号行为
 - [x] [contracts/health-and-logging.md](contracts/health-and-logging.md) 固定健康状态和计数器
+- [x] [contracts/risk-acceptance.md](contracts/risk-acceptance.md) 固定审批 TOML、策略摘要和失效规则
 - [x] [contracts/benchmark-protocol.md](contracts/benchmark-protocol.md) 固定公平对照方法
 - [x] [quickstart.md](quickstart.md) 定义端到端验收步骤
 
@@ -218,8 +232,8 @@ benchmarks/
 - [x] 设计仅使用 Rust/Aya，并明确拒绝未合并 CO-RE 依赖
 - [x] 内核程序保持最小；路径规范化、规则顺序、输出和基准均在用户态
 - [x] ABI、事件格式、健康计数、规则版本和截断均有独立契约
-- [x] 权限、argv 原样输出与关闭控制、风险接受、日志访问与加密、资源硬上限、失效状态和
-  失败关闭均可测试
+- [x] 权限、argv 原样输出与用户态抑制、唯一 key 覆盖、root 可信风险接受、策略摘要、日志
+  访问与加密、资源硬上限、失效状态和失败关闭均可测试
 - [x] 设计工件覆盖所有宪章测试层级及内核兼容矩阵
 - [x] 性能结论受正确性门禁、重复次数和完整报告约束
 - [x] 中文注释与安全文档要求已进入代码边界和评审门禁

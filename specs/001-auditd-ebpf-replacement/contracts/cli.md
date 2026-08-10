@@ -31,8 +31,10 @@ auditd-ebpf run \
 argv 与生产策略：
 
 - `--emit-argv` 为默认行为，在事件上限内原样输出匹配 exec 规则的 `a0`–`a31`。
-- `--no-emit-argv` 全局关闭 argv 读取和输出；配置文件允许按规则 key 设置
-  `argv.rules.<key>.enabled=false`，规则级设置优先于全局值。
+- `--no-emit-argv` 全局抑制 argv 输出，但内核仍按相同上限读取并提交 RingBuf；配置文件允许
+  按规则 key 设置 `argv.rules.<key>.enabled=false`，规则级设置优先于全局值。
+- 只要某个 key 存在规则级覆盖，候选 RuleSet 中该 key 的 exec 规则必须恰好一条；冲突时
+  `run` 和 `check-rules` 均返回规则错误，不得任意选择。
 - `--deployment-mode production` 必须提供可信的风险接受文件，并在加载 eBPF 前通过 journal、
   本地文件、导出、rsyslog 目的地、经认证加密转发和保留期验证。
 - `non-production` 允许门禁未通过时运行，但状态必须输出 `production_policy=failed`，且不得被
@@ -72,6 +74,22 @@ auditd-ebpf check-production \
 
 成功时 stdout 输出逐项 PASS 摘要；失败时 stderr 输出稳定错误码和修复建议，并返回退出码 9。
 
+### `auditd-ebpf print-policy-digest`
+
+读取与 `run` 相同的规则和有效配置，输出 `policy_digest_version=1` 及当前日志安全策略的
+`sha256:<hex>` 摘要，但不加载 eBPF。摘要覆盖 argv 全局/按 key 输出策略、获准读取主体、
+日志目的地、传输认证和逐目的地保留期。
+
+```text
+auditd-ebpf print-policy-digest \
+  [--rules-dir PATH | --rules-file PATH] \
+  [--config /etc/auditd-ebpf/config.toml] \
+  [--value-only]
+```
+
+`--value-only` 只输出摘要值，供审批文件生成脚本使用。未知摘要版本、规则 key 覆盖冲突或配置
+无效时返回相应非零退出码。
+
 ## Configuration Precedence
 
 ```text
@@ -110,7 +128,7 @@ CLI arguments > environment variables > /etc/auditd-ebpf/config.toml > compiled 
 | 6 | eBPF 加载、map 或 attach 失败 |
 | 7 | 运行时不可恢复错误，包括 stdout 永久失败 |
 | 8 | 停止排空超时；最终状态记录包含未输出数量 |
-| 9 | 生产风险接受或日志访问、加密、保留策略门禁失败 |
+| 9 | 生产风险接受、策略摘要或日志访问、加密、保留策略门禁失败 |
 
 ## Version Output
 
