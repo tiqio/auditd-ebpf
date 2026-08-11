@@ -308,3 +308,21 @@ Setup → Foundational → US1 (MVP) → US2 → US3 → Polish/Release
 - 特权测试缺少环境时可以报告跳过，但不得删除测试或把跳过当作通过。
 - `benchmarks/reports/` 中 invalid/failed 样本必须提交或归档，不得只保留通过样本。
 - 所有里程碑 commit 必须在对应任务列出的质量门禁通过后创建。
+
+## Phase 7: Convergence
+
+- [ ] T114 CRITICAL：将运行时 RingBuf 解码、gap、用户队列和 stdout 输出统一接入 `OutputPipeline`，禁止静默忽略失败，并以真实失败计数驱动 degraded 状态，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/output/` per FR-009/FR-011/FR-012 (partial)
+- [ ] T115 CRITICAL：移除运行时对 `ppid=0`、空 `exe`、空 `perm` 等不可靠字段的误导性填充，统一使用明确未知或缺失表示并增加回归测试，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/output/event_formatter.rs` per FR-008 (contradicts)
+- [ ] T116 CRITICAL：将全局及按规则 `key` 的 argv 输出控制传入运行时 `RuleEngine`，移除 `RuleEngine::new(plan, true)` 硬编码，并验证关闭后参数不会进入任何用户态日志，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/rule_engine.rs` per FR-007a (partial)
+- [ ] T117 CRITICAL：在加载 eBPF、打开所需资源并完成初始化后主动降低进程 capabilities，保留运行期最小权限并增加特权集成测试，涉及 `crates/auditd-ebpf/src/runtime.rs`、`tests/privileged/` per SR-002 (missing)
+- [ ] T118 CRITICAL：将进程与挂载缓存接入运行时路径解析，按事件进程 root、mount namespace、cwd 和 dirfd 解析 path/dir，并在无法可靠关联时输出 gap、累计路径缺口和进入 degraded，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/path_resolution/` per FR-008a (partial)
+- [ ] T119 实现 SIGHUP 候选规则的完整验证、版本分配和原子替换，失败时保留上一完整版本并输出可操作诊断，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf-rules/src/` per FR-005 (missing)
+- [ ] T120 使用内核每 CPU 丢失计数、collector、队列、解析和输出计数生成状态与 clean 生命周期快照，移除从 consumed 推导及硬编码零值，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/lifecycle/` per FR-011/FR-012a (contradicts)
+- [ ] T121 在默认规则目录没有可用规则时回退读取 `/etc/audit/audit.rules`，保持整套验证、拒绝部分生效和版本语义一致，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf-rules/src/loader.rs` per FR-001 (partial)
+- [ ] T122 将 benchmark `compare` 从仅生成计划扩展为实际执行 syscall/path/mixed × capture-only/operational × auditd/auditd-ebpf 的随机化矩阵，并保留全部原始结果，涉及 `crates/auditd-ebpf-bench/src/main.rs`、`crates/auditd-ebpf-bench/src/runner.rs` per FR-014 (missing)
+- [ ] T123 实现 capture-only 与 operational 的真实等价 sink、服务启停、预热、120 秒测量、冷却和恢复编排，替换仅描述阶段的模式计划，涉及 `crates/auditd-ebpf-bench/src/modes/`、`crates/auditd-ebpf-bench/src/runners/` per FR-014 (partial)
+- [ ] T124 重写真实 auditd RAW 多记录规范化，支持数字 syscall、serial 关联、hex/quoted 字段与可靠转义解析，移除对合成 `identity` 和简单空白切分的依赖，涉及 `crates/auditd-ebpf-bench/src/correctness.rs` per FR-015 (partial)
+- [ ] T125 将每次 workload executor 实际完成的 operation ledger 连接到预期事件集合，按唯一操作标识验证缺失、重复和误报，涉及 `crates/auditd-ebpf-bench/src/executor.rs`、`crates/auditd-ebpf-bench/src/workloads/`、`crates/auditd-ebpf-bench/src/correctness.rs` per SC-002/FR-015 (partial)
+- [ ] T126 补齐基准协议要求的环境、affinity、频率策略、规则 hash、sink 配置、队列、CPU/RSS、丢失和污染指标，并在序列化测试中固定字段，涉及 `crates/auditd-ebpf-bench/src/environment.rs`、`crates/auditd-ebpf-bench/src/metrics.rs` per FR-014/SC-007 (partial)
+- [ ] T127 按场景、模式和实现分别强制至少 5 个有效样本，缺组、失败或污染样本时报告必须为 invalid 且禁止性能声明，涉及 `crates/auditd-ebpf-bench/src/report.rs`、`crates/auditd-ebpf-bench/src/statistics.rs` per SC-007 (partial)
+- [ ] T128 审查资格检查中强制 `performance` governor 与 `AUDITD_EBPF_BENCH_ISOLATED` 运维声明是否属于协议要求；保留时补充理由和等价证据路径，否则调整为协议允许的稳定频率与隔离证明，涉及 `crates/auditd-ebpf-bench/src/qualification.rs`、`specs/001-auditd-ebpf-replacement/plan.md` per plan: qualification decision (unrequested)
