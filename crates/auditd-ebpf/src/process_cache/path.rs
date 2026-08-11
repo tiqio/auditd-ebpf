@@ -4,6 +4,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum PathError {
+    #[error("缺少线程路径上下文")]
+    MissingThread,
+    #[error("mount namespace 状态已失效，必须重新从 /proc 引导")]
+    StaleMountEpoch,
+    #[error("缺少 root、cwd 或 dirfd 路径")]
+    MissingBase,
     #[error("路径包含禁止的父目录或前缀组件")]
     EscapesBoundary,
 }

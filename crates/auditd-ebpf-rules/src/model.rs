@@ -29,6 +29,9 @@ pub struct AuditRule {
     pub path: Option<String>,
     pub dir: Option<String>,
     pub permissions: BTreeSet<char>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub success: Option<bool>,
     pub key: String,
     pub argv_output: ArgvOutput,
 }

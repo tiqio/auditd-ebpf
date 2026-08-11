@@ -25,3 +25,28 @@ fn unique_argv_override_changes_output_not_capture() {
     assert!(plan.exec_capture_enabled);
     assert_eq!(plan.rules[0].argv_output, ArgvOutput::Disabled);
 }
+
+#[test]
+fn every_exact_match_condition_changes_rule_version() {
+    let base = RuleCompiler::compile(
+        parse_rules(
+            "base.rules",
+            "-a always,exit -F arch=b64 -S openat -F uid=1000 -F gid=100 -F success=yes -F path=/a -F perm=r -k exact",
+        )
+        .unwrap(),
+        0,
+        Default::default(),
+    )
+    .unwrap();
+    let changed = RuleCompiler::compile(
+        parse_rules(
+            "changed.rules",
+            "-a always,exit -F arch=b64 -S openat -F uid=1001 -F gid=100 -F success=yes -F path=/a -F perm=r -k exact",
+        )
+        .unwrap(),
+        0,
+        Default::default(),
+    )
+    .unwrap();
+    assert_ne!(base.version_hash, changed.version_hash);
+}

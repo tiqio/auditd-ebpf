@@ -7,6 +7,7 @@ pub enum RecordType {
     Fork = 4,
     Exit = 5,
     InternalGap = 6,
+    ProcessExec = 7,
 }
 
 /// 固定宽度公共头；用户态必须验证 schema 与长度后再读取其余字段。
@@ -41,11 +42,24 @@ pub struct SyscallEvent {
     pub comm: [u8; 16],
     pub dirfd: i32,
     pub path_flags: u32,
+    pub path_len: u16,
+    pub path2_len: u16,
+    pub path: [u8; MAX_PATH_ARG_BYTES],
+    pub path2: [u8; MAX_PATH_ARG_BYTES],
 }
+
+pub const MAX_PATH_ARG_BYTES: usize = 160;
+pub const PATH_FLAG_PRIMARY_PRESENT: u32 = 1 << 0;
+pub const PATH_FLAG_SECONDARY_PRESENT: u32 = 1 << 1;
+pub const PATH_FLAG_TRUNCATED: u32 = 1 << 2;
+pub const PATH_FLAG_MOUNT_BOUNDARY_CHANGED: u32 = 1 << 3;
 
 pub const MAX_EXEC_ARGS: usize = 32;
 pub const MAX_EXEC_ARG_BYTES: usize = 192;
 pub const MAX_EXEC_BYTES: usize = MAX_EXEC_ARGS * MAX_EXEC_ARG_BYTES;
+pub const EXEC_ARGV_FLAG_ARGUMENT_TRUNCATED: u16 = 1 << 0;
+pub const EXEC_ARGV_FLAG_ARGC_TRUNCATED: u16 = 1 << 1;
+pub const EXEC_ARGV_FLAG_READ_ERROR: u16 = 1 << 2;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -76,3 +90,7 @@ pub struct ProcessEvent {
     pub event_kind: u32,
     pub abi_arch: u32,
 }
+
+pub const PROCESS_EVENT_FORK: u32 = 1;
+pub const PROCESS_EVENT_EXEC: u32 = 2;
+pub const PROCESS_EVENT_EXIT: u32 = 3;

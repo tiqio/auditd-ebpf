@@ -12,6 +12,13 @@ pub struct MountNamespaceId {
     pub inode: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProcessAbi {
+    B64,
+    B32,
+    Unknown,
+}
+
 #[derive(Clone, Debug)]
 pub struct ThreadPathContext {
     pub process: ProcessIdentity,
@@ -21,6 +28,8 @@ pub struct ThreadPathContext {
     pub mount_epoch: u64,
     pub cwd: Option<PathBuf>,
     pub fd_table: BTreeMap<i32, PathBuf>,
+    pub abi: ProcessAbi,
+    pub mountinfo: String,
 }
 
 impl ThreadPathContext {

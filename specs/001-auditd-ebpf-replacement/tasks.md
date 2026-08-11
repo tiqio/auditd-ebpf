@@ -101,14 +101,14 @@ syscall、exec、绝对/相对/dirfd、mount namespace 和 chroot 路径操作�
 - [X] T045 [P] [US1] 实现 x86_64 B64/B32 syscall 表、perm 操作分类和版本化兼容矩阵于 `crates/auditd-ebpf-rules/src/syscalls/x86_64.rs`、`crates/auditd-ebpf-rules/src/permissions.rs`、`docs/rule-compatibility.md`
 - [X] T046 [US1] 实现 `.rules` C-locale 字节排序、root/模式校验和单文件 fallback 于 `crates/auditd-ebpf-rules/src/source.rs`
 - [X] T047 [US1] 实现粗 syscall/ABI/身份并集、任意 exec 规则即启用 argv 采集、双 generation map 数据和携带按 key argv 输出策略的 first-match 用户态计划于 `crates/auditd-ebpf-rules/src/compiler.rs`
-- [ ] T048 [US1] 实现 generation maps、syscall bitmap、进程 ABI 提示、inflight 上限和每 CPU 计数器于 `crates/auditd-ebpf-ebpf/src/maps.rs`
-- [ ] T049 [US1] 实现 raw sys_enter/sys_exit 粗筛选、参数/返回值/路径参数采集、mount/umount2/move_mount/mount_setattr/chroot/pivot_root/setns/unshare 成功结果标记和 RingBuf 提交于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`
-- [ ] T050 [US1] 实现不受输出抑制策略影响、最多 32×192 字节 argv 的 ExecAttempt、成功/失败 ExecResult、`exec_argv_captured_total` 和中文 verifier 安全注释于 `crates/auditd-ebpf-ebpf/src/programs/exec.rs`、`crates/auditd-ebpf-ebpf/src/maps.rs`
-- [ ] T051 [P] [US1] 实现 sched fork/exec/exit 事件和进程 ABI 继承提示于 `crates/auditd-ebpf-ebpf/src/programs/process.rs`
-- [ ] T052 [US1] 实现 RingBuf drain、记录解码、含 argv 的 attempt/result 有界关联、匹配后及时释放参数、超时 gap 和内存 sink 于 `crates/auditd-ebpf/src/collector/runtime.rs`、`crates/auditd-ebpf/src/collector/exec_pending.rs`
-- [ ] T053 [US1] 实现 `/proc/*/task/*` bootstrap、PID/TID 启动身份、线程 root、mount namespace `(st_dev,st_ino)`、mountinfo、ELF class、fork/exec/exit 状态更新且禁止把 argv 写入进程缓存于 `crates/auditd-ebpf/src/process_cache/bootstrap.rs`、`crates/auditd-ebpf/src/process_cache/lifecycle.rs`
-- [ ] T054 [US1] 实现线程 cwd/fd 缓存、open/dup/close/chdir/fchdir 更新、mount/root/namespace 成功变化触发全局 epoch 递增与保守失效、namespace 内词法路径规范化和 gap 生成于 `crates/auditd-ebpf/src/process_cache/fd_table.rs`、`crates/auditd-ebpf/src/process_cache/path.rs`、`crates/auditd-ebpf/src/process_cache/mounts.rs`
-- [ ] T055 [US1] 实现 arch/uid/gid/success/path/dir/perm 精确求值、process root+mount namespace 路径字符串语义、first-match、全局/唯一 key argv 输出决策和 `ResolvedAuditEvent.argv_output`，并明确不声明 symlink/inode/hard-link 等价于 `crates/auditd-ebpf/src/rules/engine.rs`、`crates/auditd-ebpf/src/rules/argv_policy.rs`、`crates/auditd-ebpf/src/rules/mod.rs`
+- [X] T048 [US1] 实现 generation maps、syscall bitmap、进程 ABI 提示、inflight 上限和每 CPU 计数器于 `crates/auditd-ebpf-ebpf/src/maps.rs`
+- [X] T049 [US1] 实现 raw sys_enter/sys_exit 粗筛选、参数/返回值/路径参数采集、mount/umount2/move_mount/mount_setattr/chroot/pivot_root/setns/unshare 成功结果标记和 RingBuf 提交于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`
+- [X] T050 [US1] 实现不受输出抑制策略影响、最多 32×192 字节 argv 的 ExecAttempt、成功/失败 ExecResult、`exec_argv_captured_total` 和中文 verifier 安全注释于 `crates/auditd-ebpf-ebpf/src/programs/exec.rs`、`crates/auditd-ebpf-ebpf/src/maps.rs`
+- [X] T051 [P] [US1] 实现 sched fork/exec/exit 事件和进程 ABI 继承提示于 `crates/auditd-ebpf-ebpf/src/programs/process.rs`
+- [X] T052 [US1] 实现 RingBuf drain、记录解码、含 argv 的 attempt/result 有界关联、匹配后及时释放参数、超时 gap 和内存 sink 于 `crates/auditd-ebpf/src/collector/runtime.rs`、`crates/auditd-ebpf/src/collector/exec_pending.rs`
+- [X] T053 [US1] 实现 `/proc/*/task/*` bootstrap、PID/TID 启动身份、线程 root、mount namespace `(st_dev,st_ino)`、mountinfo、ELF class、fork/exec/exit 状态更新且禁止把 argv 写入进程缓存于 `crates/auditd-ebpf/src/process_cache/bootstrap.rs`、`crates/auditd-ebpf/src/process_cache/lifecycle.rs`
+- [X] T054 [US1] 实现线程 cwd/fd 缓存、open/dup/close/chdir/fchdir 更新、mount/root/namespace 成功变化触发全局 epoch 递增与保守失效、namespace 内词法路径规范化和 gap 生成于 `crates/auditd-ebpf/src/process_cache/fd_table.rs`、`crates/auditd-ebpf/src/process_cache/path.rs`、`crates/auditd-ebpf/src/process_cache/mounts.rs`
+- [X] T055 [US1] 实现 arch/uid/gid/success/path/dir/perm 精确求值、process root+mount namespace 路径字符串语义、first-match、全局/唯一 key argv 输出决策和 `ResolvedAuditEvent.argv_output`，并明确不声明 symlink/inode/hard-link 等价于 `crates/auditd-ebpf/src/rules/engine.rs`、`crates/auditd-ebpf/src/rules/argv_policy.rs`、`crates/auditd-ebpf/src/rules/mod.rs`
 - [X] T056 [US1] 实现 inactive generation staging、原子切换、失败回滚和 SIGHUP reload service 于 `crates/auditd-ebpf/src/reload.rs`
 - [X] T057 [US1] 完成 `check-rules`、规范化输出、rule_version 状态和兼容矩阵生成于 `crates/auditd-ebpf/src/commands/check_rules.rs`、`crates/auditd-ebpf/src/commands/mod.rs`、`docs/rule-compatibility.md`
 - [ ] T058 [US1] 运行 parser/单 key/ABI/5.15+ 特权采集/mount namespace/chroot/路径 gap/reload 及 US1 quickstart 验证，并创建采集 MVP 里程碑 commit，涉及 `crates/auditd-ebpf-rules/`、`crates/auditd-ebpf-ebpf/`、`crates/auditd-ebpf/src/collector/`、`crates/auditd-ebpf/src/process_cache/`

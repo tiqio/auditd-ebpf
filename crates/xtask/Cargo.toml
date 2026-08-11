@@ -11,5 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+auditd-ebpf = { path = "../auditd-ebpf" }
+auditd-ebpf-rules = { path = "../auditd-ebpf-rules" }
 aya.workspace = true
 clap.workspace = true

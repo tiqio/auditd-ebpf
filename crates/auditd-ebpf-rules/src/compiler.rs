@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
 
+use crate::normalize::normalized_line;
 use crate::{Arch, ArgvOutput, AuditRule, KernelFilterPlan, RuleErrors, syscall_number};
 
 pub struct RuleCompiler;
@@ -45,10 +46,8 @@ impl RuleCompiler {
         let mut b32 = BTreeSet::new();
         let mut hasher = Sha256::new();
         for rule in &rules {
-            hasher.update(format!(
-                "{:?}|{:?}|{:?}|{}\n",
-                rule.kind, rule.arch, rule.syscalls, rule.key
-            ));
+            hasher.update(normalized_line(rule));
+            hasher.update(b"\n");
             for name in &rule.syscalls {
                 match rule.arch.unwrap_or(Arch::B64) {
                     Arch::B64 => {

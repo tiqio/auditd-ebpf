@@ -39,6 +39,16 @@ impl ExecPending {
         argv: Vec<Vec<u8>>,
         observed_argc: u32,
     ) -> Result<(), PendingError> {
+        self.insert_at(process, attempt, argv, observed_argc, Instant::now())
+    }
+    pub fn insert_at(
+        &mut self,
+        process: u64,
+        attempt: u64,
+        argv: Vec<Vec<u8>>,
+        observed_argc: u32,
+        inserted_at: Instant,
+    ) -> Result<(), PendingError> {
         if self.entries.len() >= self.capacity {
             return Err(PendingError::AtCapacity);
         }
@@ -47,7 +57,7 @@ impl ExecPending {
             PendingExec {
                 argv,
                 observed_argc,
-                inserted_at: Instant::now(),
+                inserted_at,
             },
         );
         Ok(())
@@ -55,10 +65,15 @@ impl ExecPending {
     pub fn complete(&mut self, process: u64, attempt: u64) -> Option<PendingExec> {
         self.entries.remove(&(process, attempt))
     }
-    pub fn expire(&mut self, now: Instant) -> usize {
-        let before = self.entries.len();
-        self.entries
-            .retain(|_, entry| now.duration_since(entry.inserted_at) < self.timeout);
-        before - self.entries.len()
+    pub fn expire(&mut self, now: Instant) -> Vec<(u64, u64)> {
+        let mut expired = Vec::new();
+        self.entries.retain(|key, entry| {
+            let keep = now.duration_since(entry.inserted_at) < self.timeout;
+            if !keep {
+                expired.push(*key);
+            }
+            keep
+        });
+        expired
     }
 }

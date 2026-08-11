@@ -885,6 +885,8 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "auditd-ebpf",
+ "auditd-ebpf-rules",
  "aya",
  "clap",
 ]

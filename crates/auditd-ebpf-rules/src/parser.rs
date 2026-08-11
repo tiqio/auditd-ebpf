@@ -54,6 +54,9 @@ fn parse_line(
         path: None,
         dir: None,
         permissions: BTreeSet::new(),
+        uid: None,
+        gid: None,
+        success: None,
         key: String::new(),
         argv_output: Default::default(),
     };
@@ -139,11 +142,37 @@ fn parse_field(
         rule.dir = Some(validate_path(file, line, Some(path))?);
     } else if let Some(perms) = value.strip_prefix("perm=") {
         rule.permissions = parse_permissions(file, line, perms)?;
-    } else if ["uid", "euid", "gid", "egid", "success"]
-        .iter()
-        .any(|name| value.starts_with(name))
+    } else if let Some(number) = value
+        .strip_prefix("uid=")
+        .or_else(|| value.strip_prefix("euid="))
     {
-        // 首版模型暂不保存这些值，但词法层接受契约字段，精确比较器在 US1 engine 中扩展。
+        rule.uid = Some(
+            number
+                .parse()
+                .map_err(|_| RuleErrors::one(file, line, "E_UID", "uid 必须为 u32"))?,
+        );
+    } else if let Some(number) = value
+        .strip_prefix("gid=")
+        .or_else(|| value.strip_prefix("egid="))
+    {
+        rule.gid = Some(
+            number
+                .parse()
+                .map_err(|_| RuleErrors::one(file, line, "E_GID", "gid 必须为 u32"))?,
+        );
+    } else if let Some(success) = value.strip_prefix("success=") {
+        rule.success = Some(match success {
+            "yes" | "1" => true,
+            "no" | "0" => false,
+            _ => {
+                return Err(RuleErrors::one(
+                    file,
+                    line,
+                    "E_SUCCESS",
+                    "success 只能为 yes/no/1/0",
+                ));
+            }
+        });
     } else {
         return Err(RuleErrors::one(
             file,
