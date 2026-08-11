@@ -1,0 +1,14 @@
+module(load="imtcp")
+template(name="RawMessage" type="string" string="%msg%\n")
+ruleset(name="receive") {
+  action(
+    type="omfile"
+    File="@OUTPUT@"
+    FileOwner="root"
+    FileGroup="root"
+    FileCreateMode="0600"
+    template="RawMessage"
+  )
+}
+input(type="imtcp" port="@DEST_PORT@" ruleset="receive")
+

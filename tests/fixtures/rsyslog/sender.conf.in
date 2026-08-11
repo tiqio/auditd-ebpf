@@ -1,0 +1,21 @@
+global(workDirectory="@SPOOL@")
+module(load="imtcp")
+template(name="RawMessage" type="string" string="%msg%\n")
+ruleset(name="ingress") {
+  action(
+    type="omfwd"
+    Target="127.0.0.1"
+    Port="@DEST_PORT@"
+    Protocol="tcp"
+    template="RawMessage"
+    action.resumeRetryCount="-1"
+    action.resumeInterval="1"
+    queue.type="LinkedList"
+    queue.filename="forward"
+    queue.size="10000"
+    queue.maxDiskSpace="16m"
+    queue.saveonshutdown="on"
+  )
+}
+input(type="imtcp" port="@SOURCE_PORT@" ruleset="ingress")
+
