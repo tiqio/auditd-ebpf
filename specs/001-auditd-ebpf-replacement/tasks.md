@@ -311,7 +311,7 @@ Setup → Foundational → US1 (MVP) → US2 → US3 → Polish/Release
 
 ## Phase 7: Convergence
 
-- [ ] T114 CRITICAL：将运行时 RingBuf 解码、gap、用户队列和 stdout 输出统一接入 `OutputPipeline`，禁止静默忽略失败，并以真实失败计数驱动 degraded 状态，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/output/` per FR-009/FR-011/FR-012 (partial)
+- [X] T114 CRITICAL：将运行时 RingBuf 解码、gap、用户队列和 stdout 输出统一接入 `OutputPipeline`，禁止静默忽略失败，并以真实失败计数驱动 degraded 状态，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/output/` per FR-009/FR-011/FR-012 (partial)
 - [ ] T115 CRITICAL：移除运行时对 `ppid=0`、空 `exe`、空 `perm` 等不可靠字段的误导性填充，统一使用明确未知或缺失表示并增加回归测试，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/output/event_formatter.rs` per FR-008 (contradicts)
 - [ ] T116 CRITICAL：将全局及按规则 `key` 的 argv 输出控制传入运行时 `RuleEngine`，移除 `RuleEngine::new(plan, true)` 硬编码，并验证关闭后参数不会进入任何用户态日志，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/rule_engine.rs` per FR-007a (partial)
 - [ ] T117 CRITICAL：在加载 eBPF、打开所需资源并完成初始化后主动降低进程 capabilities，保留运行期最小权限并增加特权集成测试，涉及 `crates/auditd-ebpf/src/runtime.rs`、`tests/privileged/` per SR-002 (missing)

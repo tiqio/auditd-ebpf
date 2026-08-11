@@ -18,6 +18,23 @@ pub fn unclean_shutdown_gap(
     )
 }
 
+/// 格式化运行时采集缺口，确保解码失败和 exec 关联失败不会只停留在内存计数中。
+///
+/// `reason` 会经过与普通审计字段相同的可逆转义，因此错误文本中的空格、引号或控制字符
+/// 不会破坏 journald/rsyslog 所依赖的单行记录边界。
+#[must_use]
+pub fn collector_gap(identity: &HostIdentity, reason: &[u8], sequence: u64, now_ms: u64) -> String {
+    format!(
+        "type=AUDITD_EBPF_GAP msg=audit(0.000:{sequence}) schema=1 host={} machine_id={} event_id={} reason={} count=1 first_seen={} last_seen={}\n",
+        super::event_formatter::escape(identity.host.as_bytes()),
+        identity.machine_id,
+        super::event_formatter::escape(format!("collector-gap-{sequence}").as_bytes()),
+        super::event_formatter::escape(reason),
+        now_ms,
+        now_ms,
+    )
+}
+
 #[must_use]
 pub fn diagnostic(
     identity: &HostIdentity,

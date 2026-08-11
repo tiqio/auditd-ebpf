@@ -17,15 +17,19 @@ use std::{
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::{
-    collector::runtime::{CollectedRecord, CollectorRuntime, CorrelatedExec},
+    collector::runtime::{CollectedRecord, CollectorGap, CollectorRuntime, CorrelatedExec},
     identity::{HostIdentity, MachineIdSource},
     lifecycle::{
         model::{LifecycleMarker, LifecycleState},
         state_file::LifecycleStateFile,
     },
     loader::LoadedBpf,
-    output::event_formatter::{AuditEvent, format_event},
-    output::status_formatter::{status, unclean_shutdown_gap},
+    output::{
+        adaptive_queue::{DEFAULT_INITIAL_BYTES, DEFAULT_MAX_BYTES},
+        event_formatter::{AuditEvent, format_event},
+        status_formatter::{collector_gap, diagnostic, status, unclean_shutdown_gap},
+        writer::{OutputPipeline, WriterError},
+    },
     rules::{
         argv_policy::EffectiveArgvOutput,
         engine::{CandidateEvent, RuleEngine},
@@ -250,7 +254,8 @@ async fn run_async(
     loop {
         tokio::select! {
             _ = usr1.recv() => {
-                eprint!("{}", status(&identity, if previous_dirty { "degraded" } else { "healthy" }, 0, 0, false));
+                let collector_degraded = collector.as_ref().is_some_and(KernelCollector::is_degraded);
+                eprint!("{}", status(&identity, if previous_dirty || collector_degraded { "degraded" } else { "healthy" }, 0, 0, false));
             }
             _ = hangup.recv() => {
                 eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=info code=reload_requested component=runtime message=\"SIGHUP\"", identity.host, identity.machine_id);
@@ -309,8 +314,51 @@ fn compile_rules(rules_dir: &Path) -> anyhow::Result<auditd_ebpf_rules::KernelFi
 
 struct KernelCollector {
     stop: Arc<AtomicBool>,
-    consumed: Arc<AtomicU64>,
+    counters: Arc<CollectorCounters>,
     thread: Option<thread::JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct CollectorCounters {
+    consumed: AtomicU64,
+    parse_failed: AtomicU64,
+    queue_dropped: AtomicU64,
+    output_succeeded: AtomicU64,
+    stdout_failed: AtomicU64,
+    gaps_generated: AtomicU64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct CollectorSnapshot {
+    consumed: u64,
+    parse_failed: u64,
+    queue_dropped: u64,
+    output_succeeded: u64,
+    stdout_failed: u64,
+    gaps_generated: u64,
+}
+
+impl CollectorSnapshot {
+    #[must_use]
+    const fn is_degraded(self) -> bool {
+        self.parse_failed != 0
+            || self.queue_dropped != 0
+            || self.stdout_failed != 0
+            || self.gaps_generated != 0
+    }
+}
+
+impl CollectorCounters {
+    fn snapshot(&self) -> CollectorSnapshot {
+        CollectorSnapshot {
+            consumed: self.consumed.load(Ordering::Relaxed),
+            parse_failed: self.parse_failed.load(Ordering::Relaxed),
+            queue_dropped: self.queue_dropped.load(Ordering::Relaxed),
+            output_succeeded: self.output_succeeded.load(Ordering::Relaxed),
+            stdout_failed: self.stdout_failed.load(Ordering::Relaxed),
+            gaps_generated: self.gaps_generated.load(Ordering::Relaxed),
+        }
+    }
 }
 
 impl KernelCollector {
@@ -320,59 +368,81 @@ impl KernelCollector {
         identity: HostIdentity,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
-        let consumed = Arc::new(AtomicU64::new(0));
+        let counters = Arc::new(CollectorCounters::default());
         let thread_stop = Arc::clone(&stop);
-        let thread_consumed = Arc::clone(&consumed);
+        let thread_counters = Arc::clone(&counters);
         let thread = thread::spawn(move || {
             let engine = RuleEngine::new(plan, true);
             let mut collector_runtime = CollectorRuntime::new(65_536, Duration::from_secs(30));
             let mut completed_execs = BTreeMap::<u64, CorrelatedExec>::new();
             let mut output_sequence = 0_u64;
-            // collector 是 stdout 的唯一审计事件写入者，在线程生命周期内持有锁可避免
-            // 每条事件重复获取全局 stdout mutex；journald 仍以换行分隔完整记录。
+            // collector 是 stdout 的唯一审计事件写入者。统一管线同时持有 stdout/stderr 锁，
+            // 既避免逐事件获取全局锁，也保证审计记录先进入有界动态队列再作为完整行写出。
             let stdout = io::stdout();
-            let mut stdout = stdout.lock();
-            loop {
+            let stderr = io::stderr();
+            let mut pipeline = OutputPipeline::new(
+                stdout.lock(),
+                stderr.lock(),
+                DEFAULT_INITIAL_BYTES,
+                DEFAULT_MAX_BYTES,
+            )
+            .expect("默认输出队列容量必须有效");
+            'collect: loop {
                 let mut drained = false;
                 while let Some(item) = ring.next() {
                     drained = true;
-                    thread_consumed.fetch_add(1, Ordering::Relaxed);
-                    if collector_runtime.accept(&item).is_ok() {
-                        for record in collector_runtime.take_output() {
-                            match record {
-                                CollectedRecord::Exec(exec) => {
-                                    completed_execs.insert(exec.process, exec);
-                                }
-                                CollectedRecord::Kernel(
-                                    crate::collector::decode::KernelRecord::Syscall(event),
-                                ) => {
-                                    let correlated = completed_execs.remove(&event.header.pid_tgid);
-                                    if let Some(line) = format_syscall_record(
-                                        &engine,
-                                        &identity,
-                                        &event,
-                                        correlated.as_ref(),
-                                        output_sequence,
-                                    ) {
-                                        let _ = stdout.write_all(line.as_bytes());
-                                        output_sequence = output_sequence.wrapping_add(1);
-                                    }
-                                }
-                                CollectedRecord::Kernel(_) | CollectedRecord::Gap(_) => {}
-                            }
+                    thread_counters.consumed.fetch_add(1, Ordering::Relaxed);
+                    if let Err(error) = collector_runtime.accept(&item) {
+                        thread_counters.parse_failed.fetch_add(1, Ordering::Relaxed);
+                        let reason = format!("decode_error:{error}");
+                        if submit_gap(
+                            &mut pipeline,
+                            &identity,
+                            &thread_counters,
+                            &reason,
+                            output_sequence,
+                        ) {
+                            break 'collect;
                         }
+                        output_sequence = output_sequence.wrapping_add(1);
+                        continue;
                     }
+                    if process_collected_records(
+                        collector_runtime.take_output(),
+                        &engine,
+                        &identity,
+                        &mut completed_execs,
+                        &mut pipeline,
+                        &thread_counters,
+                        &mut output_sequence,
+                    ) {
+                        break 'collect;
+                    }
+                }
+                collector_runtime.expire(Instant::now());
+                if process_collected_records(
+                    collector_runtime.take_output(),
+                    &engine,
+                    &identity,
+                    &mut completed_execs,
+                    &mut pipeline,
+                    &thread_counters,
+                    &mut output_sequence,
+                ) {
+                    break;
                 }
                 if thread_stop.load(Ordering::Acquire) && !drained {
                     break;
                 }
                 thread::sleep(Duration::from_millis(1));
             }
-            let _ = stdout.flush();
+            if let Err(error) = pipeline.flush() {
+                record_pipeline_failure(&mut pipeline, &identity, &thread_counters, &error);
+            }
         });
         Self {
             stop,
-            consumed,
+            counters,
             thread: Some(thread),
         }
     }
@@ -397,7 +467,145 @@ impl KernelCollector {
     }
 
     fn consumed(&self) -> u64 {
-        self.consumed.load(Ordering::Relaxed)
+        self.counters.snapshot().consumed
+    }
+
+    fn is_degraded(&self) -> bool {
+        self.counters.snapshot().is_degraded()
+    }
+}
+
+fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
+    records: Vec<CollectedRecord>,
+    engine: &RuleEngine,
+    identity: &HostIdentity,
+    completed_execs: &mut BTreeMap<u64, CorrelatedExec>,
+    pipeline: &mut OutputPipeline<StdoutWriter, StderrWriter>,
+    counters: &CollectorCounters,
+    output_sequence: &mut u64,
+) -> bool {
+    for record in records {
+        match record {
+            CollectedRecord::Exec(exec) => {
+                completed_execs.insert(exec.process, exec);
+            }
+            CollectedRecord::Kernel(crate::collector::decode::KernelRecord::Syscall(event)) => {
+                let correlated = completed_execs.remove(&event.header.pid_tgid);
+                if let Some(line) = format_syscall_record(
+                    engine,
+                    identity,
+                    &event,
+                    correlated.as_ref(),
+                    *output_sequence,
+                ) {
+                    let result = pipeline
+                        .enqueue_audit(line.as_bytes())
+                        .and_then(|_| pipeline.drain_all());
+                    *output_sequence = output_sequence.wrapping_add(1);
+                    match result {
+                        Ok(()) => {
+                            counters.output_succeeded.fetch_add(1, Ordering::Relaxed);
+                        }
+                        Err(error) => {
+                            if record_pipeline_failure(pipeline, identity, counters, &error) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            CollectedRecord::Gap(gap) => {
+                let reason = collector_gap_reason(&gap);
+                if submit_gap(pipeline, identity, counters, &reason, *output_sequence) {
+                    return true;
+                }
+                *output_sequence = output_sequence.wrapping_add(1);
+            }
+            CollectedRecord::Kernel(_) => {}
+        }
+    }
+    false
+}
+
+fn submit_gap<StdoutWriter: Write, StderrWriter: Write>(
+    pipeline: &mut OutputPipeline<StdoutWriter, StderrWriter>,
+    identity: &HostIdentity,
+    counters: &CollectorCounters,
+    reason: &str,
+    sequence: u64,
+) -> bool {
+    counters.gaps_generated.fetch_add(1, Ordering::Relaxed);
+    let line = collector_gap(identity, reason.as_bytes(), sequence, now_millis());
+    let result = pipeline
+        .enqueue_gap(line.as_bytes())
+        .and_then(|_| pipeline.drain_all());
+    match result {
+        Ok(()) => {
+            emit_degraded_diagnostic(pipeline, identity, counters, reason.as_bytes());
+            false
+        }
+        Err(error) => record_pipeline_failure(pipeline, identity, counters, &error),
+    }
+}
+
+fn record_pipeline_failure<StdoutWriter: Write, StderrWriter: Write>(
+    pipeline: &mut OutputPipeline<StdoutWriter, StderrWriter>,
+    identity: &HostIdentity,
+    counters: &CollectorCounters,
+    error: &WriterError,
+) -> bool {
+    match error {
+        WriterError::Queue(_) => {
+            counters.queue_dropped.fetch_add(1, Ordering::Relaxed);
+        }
+        WriterError::Stdout(_) => {
+            counters.stdout_failed.fetch_add(1, Ordering::Relaxed);
+        }
+        WriterError::Stderr(_) => {}
+    }
+    emit_degraded_diagnostic(pipeline, identity, counters, error.to_string().as_bytes());
+    error.is_permanent_stdout_failure()
+}
+
+fn emit_degraded_diagnostic<StdoutWriter: Write, StderrWriter: Write>(
+    pipeline: &mut OutputPipeline<StdoutWriter, StderrWriter>,
+    identity: &HostIdentity,
+    counters: &CollectorCounters,
+    message: &[u8],
+) {
+    let snapshot = counters.snapshot();
+    let detail = format!(
+        "{} consumed={} output={} parse_failed={} queue_lost={} stdout_failed={} gaps={}",
+        String::from_utf8_lossy(message),
+        snapshot.consumed,
+        snapshot.output_succeeded,
+        snapshot.parse_failed,
+        snapshot.queue_dropped,
+        snapshot.stdout_failed,
+        snapshot.gaps_generated,
+    );
+    let _ = pipeline.write_operational(
+        diagnostic(
+            identity,
+            "error",
+            "collector_degraded",
+            "collector",
+            detail.as_bytes(),
+        )
+        .as_bytes(),
+    );
+    let _ = pipeline.write_operational(status(identity, "degraded", 0, 0, false).as_bytes());
+}
+
+fn collector_gap_reason(gap: &CollectorGap) -> String {
+    match gap {
+        CollectorGap::MissingExecAttempt { process, attempt } => {
+            format!("missing_exec_attempt:process={process}:attempt={attempt}")
+        }
+        CollectorGap::ExecAttemptTimeout { process, attempt } => {
+            format!("exec_attempt_timeout:process={process}:attempt={attempt}")
+        }
+        CollectorGap::PendingCapacity => "exec_pending_capacity".into(),
     }
 }
 
@@ -501,4 +709,70 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{self, Cursor, Write};
+
+    use super::*;
+
+    struct FailingStdout;
+
+    impl Write for FailingStdout {
+        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "测试 EPIPE"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "测试 EPIPE"))
+        }
+    }
+
+    fn identity() -> HostIdentity {
+        HostIdentity {
+            host: "test-host".into(),
+            machine_id: "test-machine".into(),
+            machine_id_diagnostic: None,
+        }
+    }
+
+    #[test]
+    fn 队列硬上限失败会累计丢失并进入degraded() {
+        let mut pipeline = OutputPipeline::memory(1, 1).unwrap();
+        let counters = CollectorCounters::default();
+        let error = pipeline.enqueue_audit(b"too-large").unwrap_err();
+
+        assert!(!record_pipeline_failure(
+            &mut pipeline,
+            &identity(),
+            &counters,
+            &error,
+        ));
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.queue_dropped, 1);
+        assert!(snapshot.is_degraded());
+        let operational = String::from_utf8_lossy(pipeline.stderr_bytes());
+        assert!(operational.contains("code=collector_degraded"));
+        assert!(operational.contains("state=degraded"));
+    }
+
+    #[test]
+    fn stdout永久失败会累计并要求collector停止() {
+        let mut pipeline =
+            OutputPipeline::new(FailingStdout, Cursor::new(Vec::new()), 16, 16).unwrap();
+        let counters = CollectorCounters::default();
+        pipeline.enqueue_audit(b"audit\n").unwrap();
+        let error = pipeline.drain_all().unwrap_err();
+
+        assert!(record_pipeline_failure(
+            &mut pipeline,
+            &identity(),
+            &counters,
+            &error,
+        ));
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.stdout_failed, 1);
+        assert!(snapshot.is_degraded());
+    }
 }
