@@ -6,7 +6,8 @@ use std::{
     collections::BTreeMap,
     fs,
     io::{self, Write},
-    path::Path,
+    os::unix::ffi::OsStrExt,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -31,6 +32,11 @@ use crate::{
         event_formatter::{AuditEvent, format_event},
         status_formatter::{collector_gap, diagnostic, status, unclean_shutdown_gap},
         writer::{OutputPipeline, WriterError},
+    },
+    process_cache::{
+        ProcessCache, bootstrap,
+        lifecycle::on_mount_boundary_change,
+        model::{ProcessAbi, ProcessIdentity},
     },
     rules::{
         argv_policy::EffectiveArgvOutput,
@@ -229,7 +235,22 @@ async fn run_async(
             return 6;
         }
         match loaded.take_ring() {
-            Ok(ring) => Some((ring, active_plan.expect("加载 eBPF 时规则计划已编译"))),
+            Ok(ring) => {
+                let process_cache = match bootstrap::scan_proc() {
+                    Ok(cache) => cache,
+                    Err(error) => {
+                        eprintln!(
+                            "type=AUDITD_EBPF_DIAG level=error code=process_cache_bootstrap component=runtime message={error:?}"
+                        );
+                        return 6;
+                    }
+                };
+                Some((
+                    ring,
+                    active_plan.expect("加载 eBPF 时规则计划已编译"),
+                    process_cache,
+                ))
+            }
             Err(error) => {
                 eprintln!(
                     "type=AUDITD_EBPF_DIAG level=error code=ringbuf_open component=runtime message={error:?}"
@@ -249,10 +270,8 @@ async fn run_async(
         );
         return 6;
     }
-    let mut collector = collector_resources.map(|(ring, plan)| {
-        KernelCollector::start(ring, plan, identity.clone(), global_argv_enabled)
-    });
-
+    // 采集线程会在整个运行期持有 stdout 锁，因此必须先由主线程输出启动阶段的
+    // 不洁退出 gap；否则 previous_dirty 路径会永远等待 collector 释放 stdout。
     if previous_dirty {
         let line = unclean_shutdown_gap(
             &identity,
@@ -271,6 +290,16 @@ async fn run_async(
     } else {
         eprint!("{}", status(&identity, "healthy", 0, 0, false));
     }
+
+    let mut collector = collector_resources.map(|(ring, plan, process_cache)| {
+        KernelCollector::start(
+            ring,
+            plan,
+            identity.clone(),
+            global_argv_enabled,
+            process_cache,
+        )
+    });
 
     loop {
         tokio::select! {
@@ -363,6 +392,7 @@ struct CollectorCounters {
     output_succeeded: AtomicU64,
     stdout_failed: AtomicU64,
     gaps_generated: AtomicU64,
+    path_resolution_failed: AtomicU64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -373,6 +403,7 @@ struct CollectorSnapshot {
     output_succeeded: u64,
     stdout_failed: u64,
     gaps_generated: u64,
+    path_resolution_failed: u64,
 }
 
 impl CollectorSnapshot {
@@ -382,6 +413,7 @@ impl CollectorSnapshot {
             || self.queue_dropped != 0
             || self.stdout_failed != 0
             || self.gaps_generated != 0
+            || self.path_resolution_failed != 0
     }
 }
 
@@ -394,6 +426,7 @@ impl CollectorCounters {
             output_succeeded: self.output_succeeded.load(Ordering::Relaxed),
             stdout_failed: self.stdout_failed.load(Ordering::Relaxed),
             gaps_generated: self.gaps_generated.load(Ordering::Relaxed),
+            path_resolution_failed: self.path_resolution_failed.load(Ordering::Relaxed),
         }
     }
 }
@@ -404,6 +437,7 @@ impl KernelCollector {
         plan: KernelFilterPlan,
         identity: HostIdentity,
         global_argv_enabled: bool,
+        process_cache: ProcessCache,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let counters = Arc::new(CollectorCounters::default());
@@ -414,15 +448,18 @@ impl KernelCollector {
             // 无论最终是否输出，内核侧仍捕获 argv，抑制仅发生在用户态 first-match 之后。
             let engine = RuleEngine::new(plan, global_argv_enabled);
             let mut collector_runtime = CollectorRuntime::new(65_536, Duration::from_secs(30));
-            let mut completed_execs = BTreeMap::<u64, CorrelatedExec>::new();
-            let mut output_sequence = 0_u64;
-            // collector 是 stdout 的唯一审计事件写入者。统一管线同时持有 stdout/stderr 锁，
-            // 既避免逐事件获取全局锁，也保证审计记录先进入有界动态队列再作为完整行写出。
+            let mut state = CollectorProcessingState {
+                completed_execs: BTreeMap::new(),
+                process_cache,
+                output_sequence: 0,
+            };
+            // collector 是 stdout 的唯一审计事件写入者，因此可以长期持有 stdout 锁；stderr
+            // 还要由主线程输出状态与信号诊断，只能在每次写入时短暂获取其内部锁，避免停止死锁。
             let stdout = io::stdout();
             let stderr = io::stderr();
             let mut pipeline = OutputPipeline::new(
                 stdout.lock(),
-                stderr.lock(),
+                stderr,
                 DEFAULT_INITIAL_BYTES,
                 DEFAULT_MAX_BYTES,
             )
@@ -440,21 +477,20 @@ impl KernelCollector {
                             &identity,
                             &thread_counters,
                             &reason,
-                            output_sequence,
+                            state.output_sequence,
                         ) {
                             break 'collect;
                         }
-                        output_sequence = output_sequence.wrapping_add(1);
+                        state.output_sequence = state.output_sequence.wrapping_add(1);
                         continue;
                     }
                     if process_collected_records(
                         collector_runtime.take_output(),
                         &engine,
                         &identity,
-                        &mut completed_execs,
+                        &mut state,
                         &mut pipeline,
                         &thread_counters,
-                        &mut output_sequence,
                     ) {
                         break 'collect;
                     }
@@ -464,10 +500,9 @@ impl KernelCollector {
                     collector_runtime.take_output(),
                     &engine,
                     &identity,
-                    &mut completed_execs,
+                    &mut state,
                     &mut pipeline,
                     &thread_counters,
-                    &mut output_sequence,
                 ) {
                     break;
                 }
@@ -515,33 +550,60 @@ impl KernelCollector {
     }
 }
 
+struct CollectorProcessingState {
+    completed_execs: BTreeMap<u64, CorrelatedExec>,
+    process_cache: ProcessCache,
+    output_sequence: u64,
+}
+
 fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
     records: Vec<CollectedRecord>,
     engine: &RuleEngine,
     identity: &HostIdentity,
-    completed_execs: &mut BTreeMap<u64, CorrelatedExec>,
+    state: &mut CollectorProcessingState,
     pipeline: &mut OutputPipeline<StdoutWriter, StderrWriter>,
     counters: &CollectorCounters,
-    output_sequence: &mut u64,
 ) -> bool {
     for record in records {
         match record {
             CollectedRecord::Exec(exec) => {
-                completed_execs.insert(exec.process, exec);
+                state.completed_execs.insert(exec.process, exec);
             }
             CollectedRecord::Kernel(crate::collector::decode::KernelRecord::Syscall(event)) => {
-                let correlated = completed_execs.remove(&event.header.pid_tgid);
+                let correlated = state.completed_execs.remove(&event.header.pid_tgid);
+                let resolved_path =
+                    match resolve_syscall_path(&mut state.process_cache, engine, &event) {
+                        Ok(path) => path,
+                        Err(reason) => {
+                            counters
+                                .path_resolution_failed
+                                .fetch_add(1, Ordering::Relaxed);
+                            if submit_gap(
+                                pipeline,
+                                identity,
+                                counters,
+                                &reason,
+                                state.output_sequence,
+                            ) {
+                                return true;
+                            }
+                            state.output_sequence = state.output_sequence.wrapping_add(1);
+                            apply_syscall_cache_updates(&mut state.process_cache, &event, None);
+                            continue;
+                        }
+                    };
                 if let Some(line) = format_syscall_record(
                     engine,
                     identity,
                     &event,
                     correlated.as_ref(),
-                    *output_sequence,
+                    resolved_path.as_deref(),
+                    state.output_sequence,
                 ) {
                     let result = pipeline
                         .enqueue_audit(line.as_bytes())
                         .and_then(|_| pipeline.drain_all());
-                    *output_sequence = output_sequence.wrapping_add(1);
+                    state.output_sequence = state.output_sequence.wrapping_add(1);
                     match result {
                         Ok(()) => {
                             counters.output_succeeded.fetch_add(1, Ordering::Relaxed);
@@ -553,13 +615,21 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                         }
                     }
                 }
+                apply_syscall_cache_updates(
+                    &mut state.process_cache,
+                    &event,
+                    resolved_path.as_deref(),
+                );
             }
             CollectedRecord::Gap(gap) => {
                 let reason = collector_gap_reason(&gap);
-                if submit_gap(pipeline, identity, counters, &reason, *output_sequence) {
+                if submit_gap(pipeline, identity, counters, &reason, state.output_sequence) {
                     return true;
                 }
-                *output_sequence = output_sequence.wrapping_add(1);
+                state.output_sequence = state.output_sequence.wrapping_add(1);
+            }
+            CollectedRecord::Kernel(crate::collector::decode::KernelRecord::Process(event)) => {
+                apply_process_event(&mut state.process_cache, &event);
             }
             CollectedRecord::Kernel(_) => {}
         }
@@ -615,13 +685,14 @@ fn emit_degraded_diagnostic<StdoutWriter: Write, StderrWriter: Write>(
 ) {
     let snapshot = counters.snapshot();
     let detail = format!(
-        "{} consumed={} output={} parse_failed={} queue_lost={} stdout_failed={} gaps={}",
+        "{} consumed={} output={} parse_failed={} queue_lost={} stdout_failed={} path_lost={} gaps={}",
         String::from_utf8_lossy(message),
         snapshot.consumed,
         snapshot.output_succeeded,
         snapshot.parse_failed,
         snapshot.queue_dropped,
         snapshot.stdout_failed,
+        snapshot.path_resolution_failed,
         snapshot.gaps_generated,
     );
     let _ = pipeline.write_operational(
@@ -649,11 +720,161 @@ fn collector_gap_reason(gap: &CollectorGap) -> String {
     }
 }
 
+fn resolve_syscall_path(
+    cache: &mut ProcessCache,
+    engine: &RuleEngine,
+    event: &auditd_ebpf_common::event::SyscallEvent,
+) -> Result<Option<PathBuf>, String> {
+    let arch = match event.arch {
+        0xc000_003e => Arch::B64,
+        0x4000_0003 => Arch::B32,
+        _ => return Ok(None),
+    };
+    let Some(syscall) = syscall_name(arch, event.syscall_nr) else {
+        return Ok(None);
+    };
+    let path_length = usize::from(event.path_len).min(event.path.len());
+    let path_bytes = &event.path[..path_length];
+    if path_bytes.is_empty() {
+        return Ok(None);
+    }
+    let raw = std::str::from_utf8(path_bytes)
+        .map_err(|error| format!("path_invalid_utf8:syscall={syscall}:error={error}"))?;
+    let (tgid, tid) = process_ids(event.header.pid_tgid);
+    let dirfd = (event.dirfd != libc::AT_FDCWD).then_some(event.dirfd);
+    let resolve = |cache: &ProcessCache| cache.resolve_path(tid, dirfd, Path::new(raw));
+
+    match resolve(cache) {
+        Ok(path) => Ok(Some(path)),
+        Err(first_error) => {
+            // 缓存缺失或 mount epoch 失效时只从事件进程自己的 /proc 视图刷新；绝不使用
+            // collector 进程的 cwd/root 猜测目标路径。
+            if let Ok(context) = bootstrap::read_thread(tgid, tid) {
+                cache.insert_context(context);
+                if let Ok(path) = resolve(cache) {
+                    return Ok(Some(path));
+                }
+            }
+            if engine.requires_resolved_path(arch, syscall) {
+                Err(format!(
+                    "path_resolution_failed:tgid={tgid}:tid={tid}:syscall={syscall}:reason={first_error}"
+                ))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+fn apply_process_event(cache: &mut ProcessCache, event: &auditd_ebpf_common::event::ProcessEvent) {
+    use auditd_ebpf_common::event::{PROCESS_EVENT_EXEC, PROCESS_EVENT_EXIT, PROCESS_EVENT_FORK};
+
+    let (tgid, tid) = process_ids(event.header.pid_tgid);
+    match event.event_kind {
+        PROCESS_EVENT_FORK => {
+            let (child_tgid, child_tid) = process_ids(event.related_pid_tgid);
+            if let Ok(context) = bootstrap::read_thread(child_tgid, child_tid) {
+                cache.insert_context(context);
+            } else {
+                let _ = cache.fork_thread(
+                    tid,
+                    ProcessIdentity {
+                        tgid: child_tgid,
+                        start_time: event.header.process_start_ns,
+                    },
+                    child_tid,
+                );
+            }
+        }
+        PROCESS_EVENT_EXEC => {
+            if let Ok(context) = bootstrap::read_thread(tgid, tid) {
+                cache.insert_context(context);
+            } else {
+                let _ = cache.exec_thread(tid, process_abi(event.abi_arch));
+            }
+        }
+        PROCESS_EVENT_EXIT => cache.exit_thread(tid),
+        _ => {}
+    }
+}
+
+fn apply_syscall_cache_updates(
+    cache: &mut ProcessCache,
+    event: &auditd_ebpf_common::event::SyscallEvent,
+    resolved_path: Option<&Path>,
+) {
+    let arch = match event.arch {
+        0xc000_003e => Arch::B64,
+        0x4000_0003 => Arch::B32,
+        _ => return,
+    };
+    let Some(syscall) = syscall_name(arch, event.syscall_nr) else {
+        return;
+    };
+    let success = event.return_value >= 0;
+    let (tgid, tid) = process_ids(event.header.pid_tgid);
+
+    if success {
+        match syscall {
+            "open" | "openat" | "openat2" | "creat" => {
+                if let Some(path) = resolved_path {
+                    let _ = cache.open_fd(tid, event.return_value as i32, path);
+                }
+            }
+            "close" => {
+                let _ = cache.close_fd(tid, event.args[0] as i32);
+            }
+            "dup" => {
+                let _ = cache.duplicate_fd(tid, event.args[0] as i32, event.return_value as i32);
+            }
+            "dup2" | "dup3" => {
+                let _ = cache.duplicate_fd(tid, event.args[0] as i32, event.args[1] as i32);
+            }
+            "chdir" => {
+                if let Some(path) = resolved_path {
+                    let _ = cache.change_cwd(tid, path);
+                }
+            }
+            "fchdir" => {
+                let _ = cache.fchdir(tid, event.args[0] as i32);
+            }
+            _ => {}
+        }
+    }
+
+    if event.path_flags & auditd_ebpf_common::event::PATH_FLAG_MOUNT_BOUNDARY_CHANGED != 0 {
+        // 内核位是最终兜底，避免 syscall 名表遗漏新旧 ABI 的边界变更调用。
+        cache.invalidate_mounts();
+    } else {
+        on_mount_boundary_change(cache, syscall, success);
+    }
+    if cache
+        .thread(tid)
+        .is_some_and(|context| !context.is_current(cache.mount_epoch()))
+        && let Ok(context) = bootstrap::read_thread(tgid, tid)
+    {
+        cache.insert_context(context);
+    }
+}
+
+const fn process_ids(pid_tgid: u64) -> (u32, u32) {
+    ((pid_tgid >> 32) as u32, pid_tgid as u32)
+}
+
+const fn process_abi(arch: u32) -> ProcessAbi {
+    match arch {
+        0xc000_003e => ProcessAbi::B64,
+        0x4000_0003 => ProcessAbi::B32,
+        _ => ProcessAbi::Unknown,
+    }
+}
+
 fn format_syscall_record(
     engine: &RuleEngine,
     identity: &HostIdentity,
     event: &auditd_ebpf_common::event::SyscallEvent,
     correlated_exec: Option<&CorrelatedExec>,
+    resolved_path: Option<&Path>,
     output_sequence: u64,
 ) -> Option<String> {
     let arch = match event.arch {
@@ -662,17 +883,10 @@ fn format_syscall_record(
         _ => return None,
     };
     let syscall = syscall_name(arch, event.syscall_nr)?;
-    let path_length = usize::from(event.path_len).min(event.path.len());
-    let path_bytes = &event.path[..path_length];
-    let path = if path_bytes.is_empty() {
-        None
-    } else {
-        Some(Path::new(std::str::from_utf8(path_bytes).ok()?))
-    };
     let mut candidate = CandidateEvent::new(arch, syscall)
         .with_identity(event.uid, event.gid)
         .with_success(event.return_value >= 0);
-    if let Some(path) = path {
+    if let Some(path) = resolved_path {
         candidate = candidate.with_path(path);
     }
     let matched = engine.evaluate(&candidate)?;
@@ -711,7 +925,7 @@ fn format_syscall_record(
         egid: event.egid,
         comm: &event.comm[..comm_length],
         exe: None,
-        path: path_bytes,
+        path: resolved_path.map_or(&[], |path| path.as_os_str().as_bytes()),
         perm: None,
         argv_output: match matched.argv_output {
             EffectiveArgvOutput::Emitted => EffectiveArgvOutput::Emitted,
@@ -720,7 +934,11 @@ fn format_syscall_record(
         argc: correlated_exec.map_or(0, |exec| exec.observed_argc),
         argv: correlated_exec.map_or(&[], |exec| exec.argv.as_slice()),
         argv_truncated: correlated_exec.is_some_and(|exec| exec.argv_flags != 0),
-        path_confidence: if path.is_some() { "lexical" } else { "none" },
+        path_confidence: if resolved_path.is_some() {
+            "namespace-lexical"
+        } else {
+            "none"
+        },
     }))
 }
 
@@ -755,9 +973,19 @@ fn now_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{self, Cursor, Write};
+    use std::{
+        collections::BTreeMap,
+        io::{self, Cursor, Write},
+    };
+
+    use auditd_ebpf_common::{
+        SCHEMA_VERSION,
+        event::{KernelEventHeader, SyscallEvent},
+    };
+    use auditd_ebpf_rules::{RuleCompiler, parse_rules};
 
     use super::*;
+    use crate::process_cache::model::MountNamespaceId;
 
     struct FailingStdout;
 
@@ -816,5 +1044,88 @@ mod tests {
         let snapshot = counters.snapshot();
         assert_eq!(snapshot.stdout_failed, 1);
         assert!(snapshot.is_degraded());
+    }
+
+    #[test]
+    fn dirfd相对路径按事件线程边界解析() {
+        let mut cache = ProcessCache::default();
+        cache.insert_thread(
+            ProcessIdentity {
+                tgid: 42,
+                start_time: 1,
+            },
+            43,
+            "/",
+            "/work",
+            MountNamespaceId {
+                device: 1,
+                inode: 2,
+            },
+        );
+        cache.open_fd(43, 5, "/srv/base").unwrap();
+        let engine = path_engine("/srv/base/file");
+        let event = syscall_event(42, 43, 5, b"file");
+
+        assert_eq!(
+            resolve_syscall_path(&mut cache, &engine, &event).unwrap(),
+            Some(PathBuf::from("/srv/base/file"))
+        );
+    }
+
+    #[test]
+    fn 路径规则缺少事件线程上下文时返回可关联gap原因() {
+        let mut cache = ProcessCache::default();
+        let engine = path_engine("/srv/base/file");
+        let event = syscall_event(u32::MAX - 1, u32::MAX, 5, b"file");
+
+        let reason = resolve_syscall_path(&mut cache, &engine, &event).unwrap_err();
+        assert!(reason.contains("path_resolution_failed"));
+        assert!(reason.contains("tid=4294967295"));
+        assert!(reason.contains("syscall=openat"));
+    }
+
+    fn path_engine(path: &str) -> RuleEngine {
+        let rules = parse_rules(
+            "runtime.rules",
+            &format!("-a always,exit -F arch=b64 -S openat -F path={path} -k path\n"),
+        )
+        .unwrap();
+        let plan = RuleCompiler::compile(rules, 0, BTreeMap::new()).unwrap();
+        RuleEngine::new(plan, true)
+    }
+
+    fn syscall_event(tgid: u32, tid: u32, dirfd: i32, path: &[u8]) -> SyscallEvent {
+        let mut event = SyscallEvent {
+            header: KernelEventHeader {
+                schema_version: SCHEMA_VERSION,
+                record_type: 1,
+                record_len: std::mem::size_of::<SyscallEvent>() as u32,
+                cpu: 0,
+                flags: 0,
+                ktime_ns: 0,
+                sequence: 0,
+                rule_version: 1,
+                pid_tgid: ((tgid as u64) << 32) | u64::from(tid),
+                process_start_ns: 0,
+            },
+            arch: 0xc000_003e,
+            syscall_nr: 257,
+            args: [0; 6],
+            return_value: 0,
+            uid: 0,
+            gid: 0,
+            euid: 0,
+            egid: 0,
+            ppid: 0,
+            comm: [0; 16],
+            dirfd,
+            path_flags: auditd_ebpf_common::event::PATH_FLAG_PRIMARY_PRESENT,
+            path_len: path.len() as u16,
+            path2_len: 0,
+            path: [0; auditd_ebpf_common::event::MAX_PATH_ARG_BYTES],
+            path2: [0; auditd_ebpf_common::event::MAX_PATH_ARG_BYTES],
+        };
+        event.path[..path.len()].copy_from_slice(path);
+        event
     }
 }

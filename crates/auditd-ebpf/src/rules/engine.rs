@@ -89,6 +89,17 @@ impl RuleEngine {
                 argv_output: resolve(self.global_argv_enabled, rule.argv_output),
             })
     }
+
+    /// 判断当前 syscall 是否存在必须依赖可靠路径边界的候选规则。
+    #[must_use]
+    pub fn requires_resolved_path(&self, arch: Arch, syscall: &str) -> bool {
+        self.plan.rules.iter().any(|rule| {
+            rule.arch.is_none_or(|rule_arch| rule_arch == arch)
+                && (rule.path.is_some() || rule.dir.is_some())
+                && (rule.kind == RuleKind::Watch
+                    || rule.syscalls.iter().any(|name| name == syscall))
+        })
+    }
 }
 
 fn matches_rule(rule: &AuditRule, event: &CandidateEvent<'_>) -> bool {

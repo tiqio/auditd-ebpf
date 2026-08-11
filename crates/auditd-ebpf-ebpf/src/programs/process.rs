@@ -44,10 +44,10 @@ fn try_fork(context: &TracePointContext) -> Result<u32, i32> {
         let _ = PROCESS_ABI.insert(child_pid, arch, 0);
     }
     emit(
-        RecordType::Fork,
         PROCESS_EVENT_FORK,
         current,
         ((parent_pid as u64) << 32) | parent_pid as u64,
+        ((child_pid as u64) << 32) | child_pid as u64,
         arch,
     );
     Ok(0)
@@ -68,9 +68,9 @@ fn try_exec(context: &TracePointContext) -> Result<u32, i32> {
         let _ = PROCESS_ABI.insert(tgid, arch, 0);
     }
     emit(
-        RecordType::ProcessExec,
         PROCESS_EVENT_EXEC,
         current,
+        ((old_pid as u64) << 32) | old_pid as u64,
         ((old_pid as u64) << 32) | old_pid as u64,
         arch,
     );
@@ -83,7 +83,7 @@ fn try_exit(context: &TracePointContext) -> Result<u32, i32> {
     let current = bpf_get_current_pid_tgid();
     let tgid = (current >> 32) as u32;
     let arch = unsafe { PROCESS_ABI.get(&tgid).copied() }.unwrap_or(0);
-    emit(RecordType::Exit, PROCESS_EVENT_EXIT, current, 0, arch);
+    emit(PROCESS_EVENT_EXIT, current, 0, 0, arch);
     if pid == tgid {
         let _ = PROCESS_ABI.remove(tgid);
     }
@@ -91,10 +91,10 @@ fn try_exit(context: &TracePointContext) -> Result<u32, i32> {
 }
 
 fn emit(
-    record_type: RecordType,
     event_kind: u32,
     pid_tgid: u64,
     parent_pid_tgid: u64,
+    related_pid_tgid: u64,
     abi_arch: u32,
 ) {
     let Some(event_pointer) = PROCESS_EVENT_SCRATCH.get_ptr_mut(0) else {
@@ -105,6 +105,11 @@ fn emit(
     let rule_version = RULE_VERSIONS.get(generation).copied().unwrap_or(0);
     // SAFETY: ProcessEvent scratch 为当前 CPU 独占，提交前覆盖完整结构。
     let event = unsafe { &mut *event_pointer };
+    let record_type = match event_kind {
+        PROCESS_EVENT_FORK => RecordType::Fork,
+        PROCESS_EVENT_EXEC => RecordType::ProcessExec,
+        _ => RecordType::Exit,
+    };
     event.header = KernelEventHeader {
         schema_version: SCHEMA_VERSION,
         record_type: record_type as u16,
@@ -118,6 +123,7 @@ fn emit(
         process_start_ns: 0,
     };
     event.parent_pid_tgid = parent_pid_tgid;
+    event.related_pid_tgid = related_pid_tgid;
     event.event_kind = event_kind;
     event.abi_arch = abi_arch;
     increment_counter(COUNTER_EVENTS_SEEN);

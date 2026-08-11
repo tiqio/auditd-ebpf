@@ -45,7 +45,7 @@ pub fn current_thread() -> anyhow::Result<ThreadPathContext> {
     read_thread(tid, tid)
 }
 
-fn read_thread(tgid: u32, tid: u32) -> anyhow::Result<ThreadPathContext> {
+pub fn read_thread(tgid: u32, tid: u32) -> anyhow::Result<ThreadPathContext> {
     let proc_tid = PathBuf::from(format!("/proc/{tgid}/task/{tid}"));
     let root_host = fs::read_link(proc_tid.join("root"))?;
     let cwd_host = fs::read_link(proc_tid.join("cwd"))?;

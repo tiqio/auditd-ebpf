@@ -87,6 +87,8 @@ pub struct ExecResult {
 pub struct ProcessEvent {
     pub header: KernelEventHeader,
     pub parent_pid_tgid: u64,
+    /// fork 时为 child pid/tgid，exec 时为被替换的旧 tid，exit 时为零。
+    pub related_pid_tgid: u64,
     pub event_kind: u32,
     pub abi_arch: u32,
 }
