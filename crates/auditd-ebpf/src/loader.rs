@@ -6,7 +6,7 @@ use auditd_ebpf_common::counters::{
     COUNTER_EXEC_ARGV_CAPTURED, COUNTER_EXEC_ARGV_DROPPED, COUNTER_INFLIGHT_DROPPED,
     COUNTER_INTERNAL_DROPPED, COUNTER_PERMISSION_CLASSIFICATION_FAILED, COUNTER_RINGBUF_DROPPED,
 };
-use auditd_ebpf_rules::KernelFilterPlan;
+use auditd_ebpf_rules::{KernelFilterPlan, RuleKind};
 use aya::{
     Ebpf,
     maps::{Array, PerCpuArray, RingBuf},
@@ -83,6 +83,7 @@ impl LoadedBpf {
                 .context("缺少 MAINTENANCE_BITMAPS_B32")?,
         )?
         .set(generation, maintenance_b32, 0)?;
+        stage_watch_path_filter(&mut self.inner, plan, generation)?;
         Array::<_, u64>::try_from(
             self.inner
                 .map_mut("RULE_VERSIONS")
@@ -129,6 +130,38 @@ impl LoadedBpf {
         Ok(())
     }
 
+    /// 停止所有内核采集入口，但保留 maps 供用户态排空 RingBuf 和读取最终计数。
+    ///
+    /// 必须先 detach 再等待 collector；否则系统调用持续写入 RingBuf，高负载下消费者
+    /// 永远观察不到空队列，优雅退出只能等到超时。
+    pub fn detach_collection_programs(&mut self) -> anyhow::Result<()> {
+        for name in ["auditd_sys_enter", "auditd_sys_exit"] {
+            let program: &mut RawTracePoint = self
+                .inner
+                .program_mut(name)
+                .with_context(|| format!("缺少 {name} 程序"))?
+                .try_into()?;
+            program
+                .unload()
+                .with_context(|| format!("无法卸载 {name}"))?;
+        }
+        for name in [
+            "auditd_sched_process_fork",
+            "auditd_sched_process_exec",
+            "auditd_sched_process_exit",
+        ] {
+            let program: &mut TracePoint = self
+                .inner
+                .program_mut(name)
+                .with_context(|| format!("缺少 {name} 程序"))?
+                .try_into()?;
+            program
+                .unload()
+                .with_context(|| format!("无法卸载 {name}"))?;
+        }
+        Ok(())
+    }
+
     pub fn take_ring(&mut self) -> anyhow::Result<RingBuf<aya::maps::MapData>> {
         let map = self
             .inner
@@ -158,6 +191,85 @@ impl LoadedBpf {
             )?,
         })
     }
+}
+
+fn stage_watch_path_filter(
+    bpf: &mut Ebpf,
+    plan: &KernelFilterPlan,
+    generation: u32,
+) -> anyhow::Result<()> {
+    const MAX_KERNEL_WATCH_PATHS: usize = 16;
+    let exact_paths: Vec<_> = plan
+        .rules
+        .iter()
+        .filter_map(|rule| rule.path.as_deref())
+        .collect();
+    let safe_to_filter = !plan.rules.is_empty()
+        && plan.rules.iter().all(|rule| {
+            rule.kind == RuleKind::Watch
+                && rule.dir.is_none()
+                && rule
+                    .path
+                    .as_deref()
+                    .is_some_and(|path| path.starts_with('/'))
+        })
+        && exact_paths.len() <= MAX_KERNEL_WATCH_PATHS;
+    let base = generation * MAX_KERNEL_WATCH_PATHS as u32;
+    let mut path_values = [0_u64; MAX_KERNEL_WATCH_PATHS];
+    let mut basename_values = [0_u64; MAX_KERNEL_WATCH_PATHS];
+    for index in 0..MAX_KERNEL_WATCH_PATHS {
+        let path = safe_to_filter.then(|| exact_paths.get(index)).flatten();
+        path_values[index] = path.map_or(0, |path| fnv1a(path.as_bytes()));
+        basename_values[index] = path.map_or(0, |path| {
+            let bytes = path.as_bytes();
+            bytes
+                .iter()
+                .rev()
+                .take(8)
+                .enumerate()
+                .fold(0_u64, |signature, (offset, byte)| {
+                    signature | (u64::from(*byte) << (offset * 8))
+                })
+        });
+    }
+    {
+        let mut hashes = Array::<_, u64>::try_from(
+            bpf.map_mut("WATCH_PATH_HASHES")
+                .context("缺少 WATCH_PATH_HASHES")?,
+        )?;
+        for (index, hash) in path_values.into_iter().enumerate() {
+            hashes.set(base + index as u32, hash, 0)?;
+        }
+    }
+    {
+        let mut basename_hashes = Array::<_, u64>::try_from(
+            bpf.map_mut("WATCH_BASENAME_HASHES")
+                .context("缺少 WATCH_BASENAME_HASHES")?,
+        )?;
+        for (index, hash) in basename_values.into_iter().enumerate() {
+            basename_hashes.set(base + index as u32, hash, 0)?;
+        }
+    }
+    Array::<_, u32>::try_from(
+        bpf.map_mut("WATCH_PATH_COUNTS")
+            .context("缺少 WATCH_PATH_COUNTS")?,
+    )?
+    .set(
+        generation,
+        if safe_to_filter {
+            exact_paths.len() as u32
+        } else {
+            0
+        },
+        0,
+    )?;
+    Ok(())
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
+    })
 }
 
 fn stage_permission_table(

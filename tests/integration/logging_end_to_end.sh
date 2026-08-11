@@ -31,7 +31,7 @@ tests/privileged/rsyslog_pipeline.sh
 # journalctl 在十秒内取回完成 argv 策略后的整行；suppressed 行不得出现参数字段。
 if command -v systemd-cat >/dev/null && command -v journalctl >/dev/null; then
   event_id="quickstart-$(date +%s)-$$"
-  journal_line="type=AUDITD_EBPF event_id=${event_id} argv_output=suppressed argc=2"
+  journal_line="type=AUDITD_EBPF event_id=${event_id} key=\"ddtest\" operation=openat path=\"/tmp/ddtest\" perm=rw argv_output=suppressed argc=2"
   started=$(date +%s)
   printf '%s\n' "${journal_line}" | systemd-cat -t auditd-ebpf --level-prefix=false
   journalctl --sync
@@ -43,6 +43,7 @@ if command -v systemd-cat >/dev/null && command -v journalctl >/dev/null; then
     sleep 0.05
   done
   [[ ${found} == "${journal_line}" ]]
+  [[ ${found} == *' key="ddtest" operation=openat path="/tmp/ddtest" perm=rw '* ]]
   [[ ${found} != *' a0='* ]]
   (( $(date +%s) - started <= 10 ))
 else
@@ -53,4 +54,3 @@ fi
 tests/privileged/lifecycle_restart.sh "${binary}" "${ebpf_object}"
 
 echo "US2 logging quickstart PASS"
-

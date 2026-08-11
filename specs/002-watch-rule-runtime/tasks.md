@@ -65,10 +65,10 @@
 ### Tests First
 
 - [X] T018 [P] [US1] 为 schema 1 保持布局、permission bits、bit 8 valid、未知 flags 和旧对象 flags=0 行为添加失败 ABI 测试于 `crates/auditd-ebpf-common/tests/abi_layout.rs`、`crates/auditd-ebpf-common/tests/kernel_records.rs`
-- [ ] T019 [P] [US1] 为 `CandidateEvent` permission 求交、O_RDWR 多权限、watch/syscall perm 一致性和首条规则顺序添加失败测试于 `crates/auditd-ebpf/tests/rule_engine.rs`
+- [X] T019 [P] [US1] 为 `CandidateEvent` permission 求交、O_RDWR 多权限、watch/syscall perm 一致性和首条规则顺序添加失败测试于 `crates/auditd-ebpf/tests/rule_engine.rs`
 - [X] T020 [P] [US1] 将现有“FD 更新线程本地”断言改为同 tgid 共享，并添加 fork 快照、exec refresh、dup/close/fd reuse/stale 测试于 `crates/auditd-ebpf/tests/process_cache.rs`
 - [X] T021 [P] [US1] 为 primary/secondary 独立 dirfd、fd-only 路径、截断、mount epoch 和 namespace lexical 边界添加失败测试于 `crates/auditd-ebpf/tests/path_resolution.rs`
-- [ ] T022 [P] [US1] 为 `perm="r"`、`perm="w"`、`perm="rw"`、失败操作和 operation syscall 名添加失败 golden 于 `crates/auditd-ebpf/tests/event_format_golden.rs`、`tests/golden/events/`
+- [X] T022 [P] [US1] 为 `perm="r"`、`perm="w"`、`perm="rw"`、失败操作和 operation syscall 名添加失败 golden 于 `crates/auditd-ebpf/tests/event_format_golden.rs`、`tests/golden/events/`
 - [X] T023 [P] [US1] 创建真实内核 watch 测试骨架，先断言当前实现无法得到 r/w/rw 事件于 `tests/privileged/watch_rules.sh`
 
 ### Kernel Permission Delivery
@@ -94,13 +94,13 @@
 
 ### Rule Match and Audit Output
 
-- [ ] T039 [US1] 将 RuleEngine 的字符集合替换为 `PermissionMask`，统一 watch 与 syscall `perm=` 的求交、路径顺序和首条规则决定逻辑于 `crates/auditd-ebpf/src/rules/engine.rs`
-- [ ] T040 [US1] 从 header flags 构造权限候选，区分 maintenance-only、普通 syscall、watch match 和权限未知，不为无规则命中事件输出日志于 `crates/auditd-ebpf/src/runtime.rs`
-- [ ] T041 [US1] 按固定 `rwxa` 顺序输出非空 `perm`、实际 syscall operation 和命中路径，保持 stdout/stderr 与转义契约于 `crates/auditd-ebpf/src/output/event_formatter.rs`
-- [ ] T042 [US1] 完成 cat、tee、O_RDWR、失败访问、无关路径、属性、exec、dual path、dup/fd reuse 和 b32 可选场景于 `tests/privileged/watch_rules.sh`
-- [ ] T043 [US1] 更新 watch 事件 golden、stdout/stderr 流和 journald 单行集成断言于 `tests/golden/events/`、`tests/integration/output_streams.rs`、`tests/integration/logging_end_to_end.sh`
-- [ ] T044 [US1] 执行 `quickstart.md` 第 1–9 节、规则/ABI/用户态测试、eBPF build 和 host kernel suite，将逐步结果记录于 `docs/watch-us1-validation.md`
-- [ ] T045 [US1] 在 T019、T022、T039–T044 全部通过后创建 `feat: evaluate and report watch rule matches` MVP 里程碑提交，提交范围为规则引擎、runtime、formatter、特权/集成测试和 `docs/watch-us1-validation.md`
+- [X] T039 [US1] 将 RuleEngine 的字符集合替换为 `PermissionMask`，统一 watch 与 syscall `perm=` 的求交、路径顺序和首条规则决定逻辑于 `crates/auditd-ebpf/src/rules/engine.rs`
+- [X] T040 [US1] 从 header flags 构造权限候选，区分 maintenance-only、普通 syscall、watch match 和权限未知，不为无规则命中事件输出日志于 `crates/auditd-ebpf/src/runtime.rs`
+- [X] T041 [US1] 按固定 `rwxa` 顺序输出非空 `perm`、实际 syscall operation 和命中路径，保持 stdout/stderr 与转义契约于 `crates/auditd-ebpf/src/output/event_formatter.rs`
+- [X] T042 [US1] 完成 cat、tee、O_RDWR、失败访问、无关路径、属性、exec、dual path、dup/fd reuse 和 b32 可选场景于 `tests/privileged/watch_rules.sh`
+- [X] T043 [US1] 更新 watch 事件 golden、stdout/stderr 流和 journald 单行集成断言于 `tests/golden/events/`、`tests/integration/output_streams.rs`、`tests/integration/logging_end_to_end.sh`
+- [X] T044 [US1] 执行 `quickstart.md` 第 1–9 节、规则/ABI/用户态测试、eBPF build 和 host kernel suite，将逐步结果记录于 `docs/watch-us1-validation.md`
+- [X] T045 [US1] 在 T019、T022、T039–T044 全部通过后创建 `feat: evaluate and report watch rule matches` MVP 里程碑提交，提交范围为规则引擎、runtime、formatter、特权/集成测试和 `docs/watch-us1-validation.md`
 
 **Checkpoint**: US1 独立可运行，示例 `-w /tmp/ddtest -p rw -k ddtest` 已在真实内核通过。
 

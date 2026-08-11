@@ -75,6 +75,47 @@ fn emitted_and_suppressed_match_golden_contract() {
 }
 
 #[test]
+fn watch_permissions_failed_result_and_real_operation_match_golden() {
+    for (permission, golden) in [
+        (
+            "r",
+            include_str!("../../../tests/golden/events/watch-r.log"),
+        ),
+        (
+            "w",
+            include_str!("../../../tests/golden/events/watch-w.log"),
+        ),
+        (
+            "rw",
+            include_str!("../../../tests/golden/events/watch-rw.log"),
+        ),
+    ] {
+        let mut watch = event(EffectiveArgvOutput::Emitted, &[]);
+        watch.key = b"ddtest";
+        watch.syscall = "openat";
+        watch.operation = "openat";
+        watch.path = b"/tmp/ddtest";
+        watch.perm = Some(permission);
+        watch.argc = 0;
+        assert_eq!(format_event(&watch), golden);
+    }
+
+    let mut failed = event(EffectiveArgvOutput::Emitted, &[]);
+    failed.key = b"ddtest";
+    failed.syscall = "openat";
+    failed.operation = "openat";
+    failed.success = false;
+    failed.exit = -13;
+    failed.path = b"/tmp/ddtest";
+    failed.perm = Some("w");
+    failed.argc = 0;
+    assert_eq!(
+        format_event(&failed),
+        include_str!("../../../tests/golden/events/watch-failed.log")
+    );
+}
+
+#[test]
 fn unclean_shutdown_is_the_only_unknown_count_gap_shape() {
     let identity = HostIdentity {
         host: "node-a".into(),

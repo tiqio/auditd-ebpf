@@ -23,7 +23,7 @@ use crate::maps::{
     COUNTER_RINGBUF_DROPPED, EVENT_COUNTERS, EVENTS, INFLIGHT_SYSCALLS, InflightSyscall,
     MAINTENANCE_BITMAPS_B32, MAINTENANCE_BITMAPS_B64, PERMISSION_MASKS_B32, PERMISSION_MASKS_B64,
     PROCESS_ABI, RULE_VERSIONS, SYSCALL_BITMAPS_B32, SYSCALL_BITMAPS_B64, SYSCALL_EVENT_SCRATCH,
-    SYSCALL_SCRATCH,
+    SYSCALL_SCRATCH, WATCH_BASENAME_HASHES, WATCH_FDS, WATCH_PATH_COUNTS, WATCH_PATH_HASHES,
 };
 use crate::programs::exec::{argv_pointer_index, capture_attempt, emit_result, is_exec_syscall};
 
@@ -64,6 +64,12 @@ fn try_sys_enter(context: &RawTracePointContext) -> Result<u32, i32> {
     let args = syscall_args(&regs, arch);
     let requested_permissions = permission_mask(generation, arch, syscall_nr);
     let maintenance_only = maintenance_contains(generation, arch, syscall_nr);
+    if requested_permissions == 0
+        && maintenance_only
+        && !maintenance_fd_candidate(arch, syscall_nr, pid_tgid, &args)
+    {
+        return Ok(0);
+    }
     let event_flags = if requested_permissions == 0 {
         0
     } else {
@@ -82,13 +88,6 @@ fn try_sys_enter(context: &RawTracePointContext) -> Result<u32, i32> {
         }
     };
     let rule_version = RULE_VERSIONS.get(generation).copied().unwrap_or(0);
-    if is_exec_syscall(arch, syscall_nr) {
-        capture_attempt(
-            pid_tgid,
-            args[argv_pointer_index(arch, syscall_nr)],
-            rule_version,
-        );
-    }
     let Some(scratch_pointer) = SYSCALL_SCRATCH.get_ptr_mut(0) else {
         increment_counter(COUNTER_INFLIGHT_DROPPED);
         return Ok(0);
@@ -110,6 +109,27 @@ fn try_sys_enter(context: &RawTracePointContext) -> Result<u32, i32> {
         core::ptr::write_bytes(inflight.path2.as_mut_ptr(), 0, MAX_PATH_ARG_BYTES);
     }
     capture_paths(inflight);
+    if requested_permissions != 0 {
+        let (primary_index, secondary_index) = path_argument_indexes(arch, syscall_nr);
+        let fd_only = primary_index >= 6 && secondary_index >= 6;
+        if fd_only {
+            let key = watch_fd_key(pid_tgid, args[0] as i32);
+            if unsafe { WATCH_FDS.get(&key).is_none() } {
+                return Ok(0);
+            }
+        } else if !watch_path_candidate(generation, inflight) {
+            return Ok(0);
+        }
+    }
+    // exec argv 体积远大于普通 syscall 事件，只能在路径候选过滤通过后采集；否则一条
+    // `-p x` watch 会为全系统 exec 复制参数并淹没共享 RingBuf。
+    if is_exec_syscall(arch, syscall_nr) {
+        capture_attempt(
+            pid_tgid,
+            args[argv_pointer_index(arch, syscall_nr)],
+            rule_version,
+        );
+    }
     if INFLIGHT_SYSCALLS.insert(pid_tgid, &*inflight, 0).is_err() {
         increment_counter(COUNTER_INFLIGHT_DROPPED);
     }
@@ -167,8 +187,100 @@ fn try_sys_exit(context: &RawTracePointContext) -> Result<u32, i32> {
     } else {
         increment_counter(COUNTER_EVENTS_SUBMITTED);
     }
+    update_watch_fds(pid_tgid, inflight, return_value);
     let _ = INFLIGHT_SYSCALLS.remove(pid_tgid);
     Ok(0)
+}
+
+#[inline(never)]
+fn maintenance_fd_candidate(arch: u32, syscall_nr: u32, pid_tgid: u64, args: &[u64; 6]) -> bool {
+    if !is_fd_maintenance(arch, syscall_nr) {
+        return true;
+    }
+    let source = watch_fd_key(pid_tgid, args[0] as i32);
+    if unsafe { WATCH_FDS.get(&source).is_some() } {
+        return true;
+    }
+    if is_dup_target_syscall(arch, syscall_nr) {
+        let target = watch_fd_key(pid_tgid, args[1] as i32);
+        return unsafe { WATCH_FDS.get(&target).is_some() };
+    }
+    false
+}
+
+#[inline(never)]
+fn update_watch_fds(pid_tgid: u64, inflight: &InflightSyscall, return_value: i64) {
+    if return_value < 0 {
+        return;
+    }
+    let arch = inflight.arch;
+    let syscall_nr = inflight.syscall_nr;
+    if is_open(arch, syscall_nr)
+        || is_openat(arch, syscall_nr)
+        || is_openat2(arch, syscall_nr)
+        || is_creat(arch, syscall_nr)
+    {
+        if inflight.path_len == 0 && inflight.path2_len == 0 {
+            return;
+        }
+        let key = watch_fd_key(pid_tgid, return_value as i32);
+        let _ = WATCH_FDS.insert(&key, &1, 0);
+        return;
+    }
+    if is_close(arch, syscall_nr) {
+        let key = watch_fd_key(pid_tgid, inflight.args[0] as i32);
+        let _ = WATCH_FDS.remove(&key);
+        return;
+    }
+    if is_dup_syscall(arch, syscall_nr) || is_fcntl_dup(arch, syscall_nr, inflight.args[1]) {
+        let source = watch_fd_key(pid_tgid, inflight.args[0] as i32);
+        let target = watch_fd_key(pid_tgid, return_value as i32);
+        if unsafe { WATCH_FDS.get(&source).is_some() } {
+            let _ = WATCH_FDS.insert(&target, &1, 0);
+        } else {
+            let _ = WATCH_FDS.remove(&target);
+        }
+    }
+}
+
+#[inline(always)]
+fn watch_fd_key(pid_tgid: u64, fd: i32) -> u64 {
+    (pid_tgid & 0xffff_ffff_0000_0000) | u64::from(fd as u32)
+}
+
+#[inline(always)]
+fn is_fd_maintenance(arch: u32, syscall_nr: u32) -> bool {
+    is_close(arch, syscall_nr)
+        || is_dup_syscall(arch, syscall_nr)
+        || is_dup_target_syscall(arch, syscall_nr)
+        || is_fcntl(arch, syscall_nr)
+}
+
+#[inline(always)]
+fn is_close(arch: u32, syscall_nr: u32) -> bool {
+    (arch == AUDIT_ARCH_X86_64 && syscall_nr == 3) || (arch == AUDIT_ARCH_I386 && syscall_nr == 6)
+}
+
+#[inline(always)]
+fn is_dup_syscall(arch: u32, syscall_nr: u32) -> bool {
+    (arch == AUDIT_ARCH_X86_64 && syscall_nr == 32) || (arch == AUDIT_ARCH_I386 && syscall_nr == 41)
+}
+
+#[inline(always)]
+fn is_dup_target_syscall(arch: u32, syscall_nr: u32) -> bool {
+    (arch == AUDIT_ARCH_X86_64 && matches!(syscall_nr, 33 | 292))
+        || (arch == AUDIT_ARCH_I386 && matches!(syscall_nr, 63 | 330))
+}
+
+#[inline(always)]
+fn is_fcntl(arch: u32, syscall_nr: u32) -> bool {
+    (arch == AUDIT_ARCH_X86_64 && syscall_nr == 72)
+        || (arch == AUDIT_ARCH_I386 && matches!(syscall_nr, 55 | 221))
+}
+
+#[inline(always)]
+fn is_fcntl_dup(arch: u32, syscall_nr: u32, command: u64) -> bool {
+    is_fcntl(arch, syscall_nr) && matches!(command, 0 | 1030)
 }
 
 fn header(
@@ -268,6 +380,11 @@ fn is_openat2(_arch: u32, syscall_nr: u32) -> bool {
     syscall_nr == 437
 }
 
+#[inline(always)]
+fn is_creat(arch: u32, syscall_nr: u32) -> bool {
+    (arch == AUDIT_ARCH_I386 && syscall_nr == 8) || (arch == AUDIT_ARCH_X86_64 && syscall_nr == 85)
+}
+
 fn select_arch(generation: u32, syscall_nr: u32, hinted_arch: Option<u32>) -> u32 {
     match hinted_arch {
         Some(AUDIT_ARCH_X86_64)
@@ -345,6 +462,126 @@ fn read_path(pointer: u64, destination: &mut [u8; MAX_PATH_ARG_BYTES]) -> u16 {
     unsafe { bpf_probe_read_user_str_bytes(pointer as *const u8, destination) }
         .map(|bytes| bytes.len() as u16)
         .unwrap_or(0)
+}
+
+#[inline(never)]
+fn watch_path_candidate(generation: u32, inflight: &InflightSyscall) -> bool {
+    let count = WATCH_PATH_COUNTS
+        .get(generation)
+        .copied()
+        .unwrap_or(0)
+        .min(16);
+    if count == 0 {
+        return true;
+    }
+    // ftruncate/fchmod 等 fd-only 操作没有用户路径，必须交给用户态 FD 表关联。
+    if inflight.path_len == 0 && inflight.path2_len == 0 {
+        return true;
+    }
+    let primary_absolute = inflight.path_len > 0 && inflight.path[0] == b'/';
+    let secondary_absolute = inflight.path2_len > 0 && inflight.path2[0] == b'/';
+    let base = (generation & 1) * 16;
+    if !primary_absolute && !secondary_absolute {
+        let primary_suffix = path_suffix_hash(&inflight.path, inflight.path_len);
+        let secondary_suffix = path_suffix_hash(&inflight.path2, inflight.path2_len);
+        let mut index = 0;
+        while index < 16 {
+            if index >= count {
+                break;
+            }
+            let expected = WATCH_BASENAME_HASHES
+                .get(base + index)
+                .copied()
+                .unwrap_or(0);
+            if (inflight.path_len > 0 && primary_suffix == expected)
+                || (inflight.path2_len > 0 && secondary_suffix == expected)
+            {
+                return true;
+            }
+            index += 1;
+        }
+        return false;
+    }
+    // 双路径 syscall 若混合绝对与相对参数，相对一侧仍需 dirfd/cwd 解析；该少见形态
+    // 保守送往用户态，避免为了候选削减制造静默漏报。
+    if (primary_absolute && inflight.path2_len > 0 && !secondary_absolute)
+        || (secondary_absolute && inflight.path_len > 0 && !primary_absolute)
+    {
+        return true;
+    }
+    // 显式初始化哈希寄存器，避免 verifier 将 Option 分支识别为“可能未写入”。
+    // absolute 布尔值仍保护比较，因此 0 只作为未计算时的占位值。
+    let mut primary_hash = 0_u64;
+    if primary_absolute {
+        primary_hash = path_hash(&inflight.path, inflight.path_len);
+    }
+    let mut secondary_hash = 0_u64;
+    if secondary_absolute {
+        secondary_hash = path_hash(&inflight.path2, inflight.path2_len);
+    }
+    let mut index = 0;
+    while index < 16 {
+        if index >= count {
+            break;
+        }
+        let expected = WATCH_PATH_HASHES.get(base + index).copied().unwrap_or(0);
+        if (primary_absolute && primary_hash == expected)
+            || (secondary_absolute && secondary_hash == expected)
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+#[inline(never)]
+fn path_suffix_hash(path: &[u8; MAX_PATH_ARG_BYTES], declared_length: u16) -> u64 {
+    let mut length = (declared_length as usize).min(MAX_PATH_ARG_BYTES);
+    if length > 0 && path[length - 1] == 0 {
+        length -= 1;
+    }
+    if length == 0 {
+        return 0;
+    }
+    let mut signature = u64::from(path[length - 1]);
+    if length > 1 {
+        signature |= u64::from(path[length - 2]) << 8;
+    }
+    if length > 2 {
+        signature |= u64::from(path[length - 3]) << 16;
+    }
+    if length > 3 {
+        signature |= u64::from(path[length - 4]) << 24;
+    }
+    if length > 4 {
+        signature |= u64::from(path[length - 5]) << 32;
+    }
+    if length > 5 {
+        signature |= u64::from(path[length - 6]) << 40;
+    }
+    if length > 6 {
+        signature |= u64::from(path[length - 7]) << 48;
+    }
+    if length > 7 {
+        signature |= u64::from(path[length - 8]) << 56;
+    }
+    signature
+}
+
+#[inline(always)]
+fn path_hash(path: &[u8; MAX_PATH_ARG_BYTES], declared_length: u16) -> u64 {
+    let length = (declared_length as usize).min(MAX_PATH_ARG_BYTES);
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    let mut index = 0;
+    while index < MAX_PATH_ARG_BYTES {
+        if index >= length || path[index] == 0 {
+            break;
+        }
+        hash = (hash ^ u64::from(path[index])).wrapping_mul(0x100_0000_01b3);
+        index += 1;
+    }
+    hash
 }
 
 #[inline(never)]

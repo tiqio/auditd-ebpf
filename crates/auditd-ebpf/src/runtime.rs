@@ -1,3 +1,4 @@
+use auditd_ebpf_common::{event::permission_from_event_flags, permission::PermissionMask};
 use auditd_ebpf_rules::{
     Arch, ArgvOutput, KernelFilterPlan, RuleCompiler, parse_rules, source::sorted_rule_files,
     syscall_name,
@@ -396,6 +397,14 @@ async fn run_async(
         false,
         Some("stopping"),
     );
+    if let Some(loaded) = loaded_bpf.as_mut()
+        && let Err(error) = loaded.detach_collection_programs()
+    {
+        eprintln!(
+            "type=AUDITD_EBPF_DIAG level=error code=ebpf_detach component=runtime message={error:?}"
+        );
+        return 7;
+    }
     let drain = collector
         .as_mut()
         .map_or(DrainOutcome::Drained, |collector| {
@@ -917,26 +926,72 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                             counters
                                 .path_resolution_failed
                                 .fetch_add(1, Ordering::Relaxed);
-                            if submit_gap(
-                                pipeline,
-                                identity,
-                                counters,
-                                &reason,
-                                state.output_sequence,
-                            ) {
-                                return true;
-                            }
-                            state.output_sequence = state.output_sequence.wrapping_add(1);
+                            // 全局 permission coverage 会观察大量与本规则路径无关的短命进程。
+                            // 逐事件输出同类 gap 会反向淹没真正审计事件；计数保留完整数量，
+                            // 周期健康记录负责聚合暴露，US3 再按原因输出受控样本。
+                            let _ = reason;
                             apply_syscall_cache_updates(&mut state.process_cache, &event, None);
                             continue;
                         }
                     };
+                let arch = match event.arch {
+                    0xc000_003e => Arch::B64,
+                    0x4000_0003 => Arch::B32,
+                    _ => {
+                        counters.unmatched.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
+                };
+                let syscall = syscall_name(arch, event.syscall_nr).unwrap_or("unknown");
+                let permission = match permission_from_event_flags(event.header.flags) {
+                    Ok(permission) => permission,
+                    Err(error) => {
+                        let reason = format!(
+                            "permission_flags_malformed:syscall={syscall}:flags={:#x}:error={error:?}",
+                            event.header.flags
+                        );
+                        if submit_gap(pipeline, identity, counters, &reason, state.output_sequence)
+                        {
+                            return true;
+                        }
+                        state.output_sequence = state.output_sequence.wrapping_add(1);
+                        apply_syscall_cache_updates(
+                            &mut state.process_cache,
+                            &event,
+                            resolved_paths.first().map(PathBuf::as_path),
+                        );
+                        continue;
+                    }
+                };
+                let permission_gap_matches_path = permission.is_none()
+                    && engine.requires_permission(arch, syscall)
+                    && engine
+                        .evaluate_paths(
+                            &CandidateEvent::new(arch, syscall)
+                                .with_identity(event.uid, event.gid)
+                                .with_success(event.return_value >= 0)
+                                .with_permissions(PermissionMask::ALL),
+                            &resolved_paths,
+                        )
+                        .is_some();
+                if permission_gap_matches_path {
+                    let reason = format!(
+                        "permission_flags_missing:tgid={}:tid={}:syscall={syscall}",
+                        event.header.pid_tgid >> 32,
+                        event.header.pid_tgid as u32
+                    );
+                    if submit_gap(pipeline, identity, counters, &reason, state.output_sequence) {
+                        return true;
+                    }
+                    state.output_sequence = state.output_sequence.wrapping_add(1);
+                }
                 if let Some((line, argv_suppressed)) = format_syscall_record(
                     &engine,
                     identity,
                     &event,
                     correlated.as_ref(),
-                    resolved_paths.first().map(PathBuf::as_path),
+                    &resolved_paths,
+                    permission,
                     state.output_sequence,
                 ) {
                     counters.matched.fetch_add(1, Ordering::Relaxed);
@@ -1124,7 +1179,18 @@ fn resolve_syscall_paths(
         |cache: &ProcessCache| -> Result<Vec<PathBuf>, crate::process_cache::path::PathError> {
             requests
                 .iter()
-                .map(|(raw, dirfd)| cache.resolve_path(tid, *dirfd, Path::new(raw)))
+                .map(|(raw, dirfd)| {
+                    let raw = Path::new(raw);
+                    if raw.is_absolute() {
+                        return crate::process_cache::path::normalize_in_boundary(
+                            Path::new("/"),
+                            Path::new("/"),
+                            None,
+                            raw,
+                        );
+                    }
+                    cache.resolve_path(tid, *dirfd, raw)
+                })
                 .collect()
         };
     match resolve_all(cache) {
@@ -1306,7 +1372,8 @@ fn format_syscall_record(
     identity: &HostIdentity,
     event: &auditd_ebpf_common::event::SyscallEvent,
     correlated_exec: Option<&CorrelatedExec>,
-    resolved_path: Option<&Path>,
+    resolved_paths: &[PathBuf],
+    permissions: Option<PermissionMask>,
     output_sequence: u64,
 ) -> Option<(String, bool)> {
     let arch = match event.arch {
@@ -1315,13 +1382,11 @@ fn format_syscall_record(
         _ => return None,
     };
     let syscall = syscall_name(arch, event.syscall_nr)?;
-    let mut candidate = CandidateEvent::new(arch, syscall)
+    let candidate = CandidateEvent::new(arch, syscall)
         .with_identity(event.uid, event.gid)
-        .with_success(event.return_value >= 0);
-    if let Some(path) = resolved_path {
-        candidate = candidate.with_path(path);
-    }
-    let matched = engine.evaluate(&candidate)?;
+        .with_success(event.return_value >= 0)
+        .with_permissions(permissions.unwrap_or(PermissionMask::EMPTY));
+    let (matched, matched_path) = engine.evaluate_paths(&candidate, resolved_paths)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
@@ -1333,6 +1398,7 @@ fn format_syscall_record(
         .position(|byte| *byte == 0)
         .unwrap_or(event.comm.len());
     let argv_suppressed = matched.argv_output == EffectiveArgvOutput::Suppressed;
+    let permission_text = permissions.map(|permission| permission.to_string());
     Some((
         format_event(&AuditEvent {
             unix_seconds: now.as_secs(),
@@ -1346,7 +1412,7 @@ fn format_syscall_record(
             key: matched.rule.key.as_bytes(),
             arch: event.arch,
             syscall,
-            operation: "syscall",
+            operation: syscall,
             success: event.return_value >= 0,
             exit: event.return_value,
             pid,
@@ -1359,8 +1425,8 @@ fn format_syscall_record(
             egid: event.egid,
             comm: &event.comm[..comm_length],
             exe: None,
-            path: resolved_path.map_or(&[], |path| path.as_os_str().as_bytes()),
-            perm: None,
+            path: matched_path.map_or(&[], |path| path.as_os_str().as_bytes()),
+            perm: permission_text.as_deref(),
             argv_output: match matched.argv_output {
                 EffectiveArgvOutput::Emitted => EffectiveArgvOutput::Emitted,
                 EffectiveArgvOutput::Suppressed => EffectiveArgvOutput::Suppressed,
@@ -1368,7 +1434,7 @@ fn format_syscall_record(
             argc: correlated_exec.map_or(0, |exec| exec.observed_argc),
             argv: correlated_exec.map_or(&[], |exec| exec.argv.as_slice()),
             argv_truncated: correlated_exec.is_some_and(|exec| exec.argv_flags != 0),
-            path_confidence: if resolved_path.is_some() {
+            path_confidence: if matched_path.is_some() {
                 "namespace-lexical"
             } else {
                 "none"

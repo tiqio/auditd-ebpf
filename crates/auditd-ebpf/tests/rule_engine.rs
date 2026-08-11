@@ -4,6 +4,7 @@ use auditd_ebpf::rules::{
     argv_policy::EffectiveArgvOutput,
     engine::{CandidateEvent, RuleEngine},
 };
+use auditd_ebpf_common::permission::PermissionMask;
 use auditd_ebpf_rules::{ArgvOutput, RuleCompiler, parse_rules};
 
 fn engine(input: &str, global_argv_enabled: bool) -> RuleEngine {
@@ -23,7 +24,7 @@ fn evaluates_identity_result_permission_and_first_match_exactly() {
         .with_identity(1000, 100)
         .with_success(true)
         .with_path(Path::new("/srv/a"))
-        .with_permission('r');
+        .with_permissions(PermissionMask::READ);
 
     let matched = engine.evaluate(&event).expect("事件应匹配");
     assert_eq!(matched.rule.key, "first");
@@ -33,8 +34,20 @@ fn evaluates_identity_result_permission_and_first_match_exactly() {
         .with_identity(0, 100)
         .with_success(true)
         .with_path(Path::new("/srv/a"))
-        .with_permission('r');
+        .with_permissions(PermissionMask::READ);
     assert_eq!(engine.evaluate(&wrong_uid).unwrap().rule.key, "fallback");
+}
+
+#[test]
+fn rdwr_intersects_read_and_write_rules_but_preserves_first_rule() {
+    let engine = engine(
+        "-w /srv/file -p r -k read-first\n-w /srv/file -p w -k write-second\n",
+        true,
+    );
+    let event = CandidateEvent::new(auditd_ebpf_rules::Arch::B64, "openat")
+        .with_path(Path::new("/srv/file"))
+        .with_permissions(PermissionMask::READ | PermissionMask::WRITE);
+    assert_eq!(engine.evaluate(&event).unwrap().rule.key, "read-first");
 }
 
 #[test]

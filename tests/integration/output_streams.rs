@@ -28,6 +28,8 @@ fn audit走stdout而status和diag走stderr() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stdout.contains("type=AUDITD_EBPF "));
+    assert!(stdout.contains("key=\"ddtest\" operation=openat"));
+    assert!(stdout.contains("path=\"/tmp/ddtest\" perm=rw"));
     assert!(!stdout.contains("AUDITD_EBPF_STATUS"));
     assert!(!stdout.contains("AUDITD_EBPF_DIAG"));
     assert!(stderr.contains("AUDITD_EBPF_STATUS"));
@@ -78,7 +80,9 @@ fn helper_main(force_epipe: bool) {
     }
 
     pipeline
-        .enqueue_audit(b"type=AUDITD_EBPF msg=test\n")
+        .enqueue_audit(
+            b"type=AUDITD_EBPF key=\"ddtest\" operation=openat path=\"/tmp/ddtest\" perm=rw\n",
+        )
         .unwrap();
     pipeline
         .write_operational(b"type=AUDITD_EBPF_STATUS state=healthy\n")

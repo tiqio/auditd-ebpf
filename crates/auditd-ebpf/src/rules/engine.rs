@@ -1,6 +1,7 @@
-use std::{collections::BTreeSet, path::Path};
+use std::path::{Path, PathBuf};
 
-use auditd_ebpf_rules::{Arch, AuditRule, KernelFilterPlan, RuleKind};
+use auditd_ebpf_common::permission::PermissionMask;
+use auditd_ebpf_rules::{Arch, AuditRule, KernelFilterPlan, RuleKind, syscall_number};
 
 use super::argv_policy::{EffectiveArgvOutput, resolve};
 
@@ -12,7 +13,7 @@ pub struct CandidateEvent<'a> {
     pub uid: Option<u32>,
     pub gid: Option<u32>,
     pub success: Option<bool>,
-    pub permissions: BTreeSet<char>,
+    pub permissions: PermissionMask,
 }
 
 impl<'a> CandidateEvent<'a> {
@@ -26,7 +27,7 @@ impl<'a> CandidateEvent<'a> {
             uid: None,
             gid: None,
             success: None,
-            permissions: BTreeSet::new(),
+            permissions: PermissionMask::EMPTY,
         }
     }
 
@@ -50,8 +51,8 @@ impl<'a> CandidateEvent<'a> {
     }
 
     #[must_use]
-    pub fn with_permission(mut self, permission: char) -> Self {
-        self.permissions.insert(permission);
+    pub const fn with_permissions(mut self, permissions: PermissionMask) -> Self {
+        self.permissions = permissions;
         self
     }
 }
@@ -83,11 +84,55 @@ impl RuleEngine {
         self.plan
             .rules
             .iter()
-            .find(|rule| matches_rule(rule, event))
+            .find(|rule| matches_rule(&self.plan, rule, event))
             .map(|rule| MatchResult {
                 rule,
                 argv_output: resolve(self.global_argv_enabled, rule.argv_output),
             })
+    }
+
+    /// 按规则文件顺序优先、候选路径 primary/secondary/fd 次序次之进行求值。
+    /// 这样 dual-path syscall 不会因为先遍历路径而让靠后的规则抢先命中。
+    pub fn evaluate_paths<'a, 'p>(
+        &'a self,
+        event: &CandidateEvent<'_>,
+        paths: &'p [PathBuf],
+    ) -> Option<(MatchResult<'a>, Option<&'p Path>)> {
+        self.plan.rules.iter().find_map(|rule| {
+            if rule.path.is_none() && rule.dir.is_none() {
+                return matches_rule(&self.plan, rule, event).then(|| {
+                    (
+                        MatchResult {
+                            rule,
+                            argv_output: resolve(self.global_argv_enabled, rule.argv_output),
+                        },
+                        None,
+                    )
+                });
+            }
+            paths.iter().find_map(|path| {
+                let mut with_path = CandidateEvent {
+                    arch: event.arch,
+                    syscall: event.syscall,
+                    path: Some(path),
+                    path_confident: event.path_confident,
+                    uid: event.uid,
+                    gid: event.gid,
+                    success: event.success,
+                    permissions: event.permissions,
+                };
+                with_path.path_confident = true;
+                matches_rule(&self.plan, rule, &with_path).then(|| {
+                    (
+                        MatchResult {
+                            rule,
+                            argv_output: resolve(self.global_argv_enabled, rule.argv_output),
+                        },
+                        Some(path.as_path()),
+                    )
+                })
+            })
+        })
     }
 
     /// 判断当前 syscall 是否存在必须依赖可靠路径边界的候选规则。
@@ -95,18 +140,26 @@ impl RuleEngine {
     pub fn requires_resolved_path(&self, arch: Arch, syscall: &str) -> bool {
         self.plan.rules.iter().any(|rule| {
             rule.arch.is_none_or(|rule_arch| rule_arch == arch)
+                && rule_covers_syscall(&self.plan, rule, arch, syscall)
                 && (rule.path.is_some() || rule.dir.is_some())
-                && (rule.kind == RuleKind::Watch
-                    || rule.syscalls.iter().any(|name| name == syscall))
+        })
+    }
+
+    #[must_use]
+    pub fn requires_permission(&self, arch: Arch, syscall: &str) -> bool {
+        self.plan.rules.iter().any(|rule| {
+            rule.arch.is_none_or(|rule_arch| rule_arch == arch)
+                && rule_covers_syscall(&self.plan, rule, arch, syscall)
+                && !rule.permissions.is_empty()
         })
     }
 }
 
-fn matches_rule(rule: &AuditRule, event: &CandidateEvent<'_>) -> bool {
+fn matches_rule(plan: &KernelFilterPlan, rule: &AuditRule, event: &CandidateEvent<'_>) -> bool {
     if rule.arch.is_some_and(|arch| arch != event.arch) {
         return false;
     }
-    if rule.kind == RuleKind::Syscall && !rule.syscalls.iter().any(|name| name == event.syscall) {
+    if !rule_covers_syscall(plan, rule, event.arch, event.syscall) {
         return false;
     }
     if rule.uid.is_some_and(|uid| event.uid != Some(uid)) {
@@ -121,7 +174,8 @@ fn matches_rule(rule: &AuditRule, event: &CandidateEvent<'_>) -> bool {
     {
         return false;
     }
-    if !rule.permissions.is_empty() && rule.permissions.is_disjoint(&event.permissions) {
+    let requested_permissions = permission_mask(&rule.permissions);
+    if !requested_permissions.is_empty() && !requested_permissions.intersects(event.permissions) {
         return false;
     }
     if (rule.path.is_some() || rule.dir.is_some()) && !event.path_confident {
@@ -138,4 +192,36 @@ fn matches_rule(rule: &AuditRule, event: &CandidateEvent<'_>) -> bool {
         return false;
     }
     true
+}
+
+fn rule_covers_syscall(
+    plan: &KernelFilterPlan,
+    rule: &AuditRule,
+    arch: Arch,
+    syscall: &str,
+) -> bool {
+    if rule.kind == RuleKind::Syscall {
+        return rule.syscalls.iter().any(|name| name == syscall);
+    }
+    let Some(number) = syscall_number(arch, syscall) else {
+        return false;
+    };
+    plan.coverage_by_rule
+        .get(&rule.rule_id)
+        .and_then(|coverage| coverage.get(&arch))
+        .is_some_and(|coverage| coverage.effective_syscalls.contains(&number))
+}
+
+fn permission_mask(permissions: &std::collections::BTreeSet<char>) -> PermissionMask {
+    permissions
+        .iter()
+        .fold(PermissionMask::EMPTY, |mask, value| {
+            mask | match value {
+                'x' => PermissionMask::EXEC,
+                'w' => PermissionMask::WRITE,
+                'r' => PermissionMask::READ,
+                'a' => PermissionMask::ATTR,
+                _ => PermissionMask::EMPTY,
+            }
+        })
 }
