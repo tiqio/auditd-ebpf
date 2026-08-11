@@ -1,0 +1,46 @@
+[Unit]
+Description=Rust/Aya eBPF audit service
+Documentation=man:auditd-ebpf(8)
+After=local-fs.target systemd-journald.service
+Wants=systemd-journald.service
+Conflicts=auditd.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+SupplementaryGroups=auditd-ebpf-auditors
+ExecStart=/usr/sbin/auditd-ebpf run
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=auditd-ebpf
+
+# CAP_SYS_ADMIN 只保留为旧内核兼容边界；程序完成能力探测后必须主动删除该回退能力。
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN
+AmbientCapabilities=CAP_BPF CAP_PERFMON
+NoNewPrivileges=yes
+LimitMEMLOCK=infinity
+
+# 规则、配置和风险接受记录全部只读。唯一持久可写目录用于 durable dirty/clean 标记。
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+ReadOnlyPaths=/etc/auditd-ebpf
+ReadWritePaths=/var/lib/auditd-ebpf
+StateDirectory=auditd-ebpf
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target
+
