@@ -21,10 +21,20 @@ pub struct HealthCounters {
     pub gap_records_generated_total: u64,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct KernelCounterSample {
+    pub events_seen_per_cpu: Vec<u64>,
+    pub events_submitted_per_cpu: Vec<u64>,
+    pub ring_reserve_failed_per_cpu: Vec<u64>,
+    pub exec_argv_captured_per_cpu: Vec<u64>,
+}
+
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 pub enum CounterError {
     #[error("首版每次启动最多记录一次历史 dirty 标记")]
     DuplicateUncleanShutdown,
+    #[error("eBPF per-CPU 计数求和溢出或违反内核不变量")]
+    InvalidKernelSample,
 }
 
 impl HealthCounters {
@@ -56,4 +66,30 @@ impl HealthCounters {
         self.unclean_shutdown_detected_total = 1;
         Ok(())
     }
+
+    pub fn apply_kernel_sample(
+        &mut self,
+        sample: &KernelCounterSample,
+    ) -> Result<(), CounterError> {
+        let events_seen_total = checked_sum(&sample.events_seen_per_cpu)?;
+        let events_submitted_total = checked_sum(&sample.events_submitted_per_cpu)?;
+        let ring_reserve_failed_total = checked_sum(&sample.ring_reserve_failed_per_cpu)?;
+        let exec_argv_captured_total = checked_sum(&sample.exec_argv_captured_per_cpu)?;
+        if events_seen_total != events_submitted_total.saturating_add(ring_reserve_failed_total) {
+            return Err(CounterError::InvalidKernelSample);
+        }
+        self.events_seen_total = events_seen_total;
+        self.events_submitted_total = events_submitted_total;
+        self.ring_reserve_failed_total = ring_reserve_failed_total;
+        self.exec_argv_captured_total = exec_argv_captured_total;
+        Ok(())
+    }
+}
+
+fn checked_sum(values: &[u64]) -> Result<u64, CounterError> {
+    values.iter().try_fold(0_u64, |total, value| {
+        total
+            .checked_add(*value)
+            .ok_or(CounterError::InvalidKernelSample)
+    })
 }

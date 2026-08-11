@@ -1,12 +1,18 @@
 use std::{fs, path::Path};
 
 use anyhow::Context;
+use auditd_ebpf_common::counters::{
+    COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED, COUNTER_EXEC_ARGV_CAPTURED,
+    COUNTER_RINGBUF_DROPPED,
+};
 use auditd_ebpf_rules::KernelFilterPlan;
 use aya::{
     Ebpf,
-    maps::{Array, RingBuf},
+    maps::{Array, PerCpuArray, RingBuf},
     programs::{RawTracePoint, TracePoint},
 };
+
+use crate::health::counters::KernelCounterSample;
 
 pub struct LoadedBpf {
     inner: Ebpf,
@@ -92,6 +98,27 @@ impl LoadedBpf {
             .context("缺少 EVENTS RingBuf")?;
         Ok(RingBuf::try_from(map)?)
     }
+
+    pub fn read_kernel_counters(&mut self) -> anyhow::Result<KernelCounterSample> {
+        let counters = PerCpuArray::<_, u64>::try_from(
+            self.inner
+                .map_mut("EVENT_COUNTERS")
+                .context("缺少 EVENT_COUNTERS")?,
+        )?;
+        Ok(KernelCounterSample {
+            events_seen_per_cpu: read_per_cpu(&counters, COUNTER_EVENTS_SEEN)?,
+            events_submitted_per_cpu: read_per_cpu(&counters, COUNTER_EVENTS_SUBMITTED)?,
+            ring_reserve_failed_per_cpu: read_per_cpu(&counters, COUNTER_RINGBUF_DROPPED)?,
+            exec_argv_captured_per_cpu: read_per_cpu(&counters, COUNTER_EXEC_ARGV_CAPTURED)?,
+        })
+    }
+}
+
+fn read_per_cpu<T: std::borrow::Borrow<aya::maps::MapData>>(
+    counters: &PerCpuArray<T, u64>,
+    index: u32,
+) -> anyhow::Result<Vec<u64>> {
+    Ok(counters.get(&index, 0)?.iter().copied().collect())
 }
 
 fn syscall_bitmap(syscalls: &std::collections::BTreeSet<u32>) -> [u64; 8] {

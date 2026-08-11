@@ -1,6 +1,7 @@
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod counters;
 pub mod event;
 
 /// 共享 ABI 的 schema 主版本。

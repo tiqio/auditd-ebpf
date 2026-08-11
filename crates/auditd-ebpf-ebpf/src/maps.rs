@@ -1,5 +1,10 @@
 use aya_ebpf::maps::{Array, HashMap, PerCpuArray, RingBuf};
 
+pub use auditd_ebpf_common::counters::{
+    COUNTER_CORRELATION_MISSED, COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED,
+    COUNTER_EXEC_ARGV_CAPTURED, COUNTER_EXEC_ARGV_DROPPED, COUNTER_INFLIGHT_DROPPED,
+    COUNTER_INTERNAL_DROPPED, COUNTER_RINGBUF_DROPPED, EVENT_COUNTER_SLOTS,
+};
 use auditd_ebpf_common::event::{
     ExecAttempt, ExecResult, MAX_PATH_ARG_BYTES, ProcessEvent, SyscallEvent,
 };
@@ -19,12 +24,6 @@ pub struct InflightSyscall {
     pub path2: [u8; MAX_PATH_ARG_BYTES],
 }
 
-pub const COUNTER_RINGBUF_DROPPED: u32 = 0;
-pub const COUNTER_INFLIGHT_DROPPED: u32 = 1;
-pub const COUNTER_CORRELATION_MISSED: u32 = 2;
-pub const COUNTER_EXEC_ARGV_CAPTURED: u32 = 3;
-pub const COUNTER_EXEC_ARGV_DROPPED: u32 = 4;
-
 #[aya_ebpf::macros::map]
 pub static ACTIVE_GENERATION: Array<u32> = Array::with_max_entries(1, 0);
 
@@ -38,7 +37,7 @@ pub static SYSCALL_BITMAPS_B32: Array<[u64; 8]> = Array::with_max_entries(2, 0);
 pub static RULE_VERSIONS: Array<u64> = Array::with_max_entries(2, 0);
 
 #[aya_ebpf::macros::map]
-pub static EVENT_COUNTERS: PerCpuArray<u64> = PerCpuArray::with_max_entries(8, 0);
+pub static EVENT_COUNTERS: PerCpuArray<u64> = PerCpuArray::with_max_entries(EVENT_COUNTER_SLOTS, 0);
 
 #[aya_ebpf::macros::map]
 pub static SYSCALL_SCRATCH: PerCpuArray<InflightSyscall> = PerCpuArray::with_max_entries(1, 0);

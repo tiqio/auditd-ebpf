@@ -12,8 +12,9 @@ use aya_ebpf::{
 };
 
 use crate::maps::{
-    ACTIVE_GENERATION, COUNTER_RINGBUF_DROPPED, EVENT_COUNTERS, EVENTS, PROCESS_ABI,
-    PROCESS_EVENT_SCRATCH, RULE_VERSIONS,
+    ACTIVE_GENERATION, COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED, COUNTER_INTERNAL_DROPPED,
+    COUNTER_RINGBUF_DROPPED, EVENT_COUNTERS, EVENTS, PROCESS_ABI, PROCESS_EVENT_SCRATCH,
+    RULE_VERSIONS,
 };
 
 #[tracepoint]
@@ -97,7 +98,7 @@ fn emit(
     abi_arch: u32,
 ) {
     let Some(event_pointer) = PROCESS_EVENT_SCRATCH.get_ptr_mut(0) else {
-        increment_counter(COUNTER_RINGBUF_DROPPED);
+        increment_counter(COUNTER_INTERNAL_DROPPED);
         return;
     };
     let generation = ACTIVE_GENERATION.get(0).copied().unwrap_or(0) & 1;
@@ -119,8 +120,11 @@ fn emit(
     event.parent_pid_tgid = parent_pid_tgid;
     event.event_kind = event_kind;
     event.abi_arch = abi_arch;
+    increment_counter(COUNTER_EVENTS_SEEN);
     if EVENTS.output::<ProcessEvent>(&*event, 0).is_err() {
         increment_counter(COUNTER_RINGBUF_DROPPED);
+    } else {
+        increment_counter(COUNTER_EVENTS_SUBMITTED);
     }
 }
 

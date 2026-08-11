@@ -1,10 +1,28 @@
 use std::time::Duration;
 
 use auditd_ebpf::health::{
-    counters::HealthCounters,
+    counters::{HealthCounters, KernelCounterSample},
     reporter::{HealthReporter, ProductionPolicyState},
     state::{HealthState, HealthStateMachine},
 };
+
+#[test]
+fn ebpf每cpu计数按字段求和且保持内核不变量() {
+    let sample = KernelCounterSample {
+        events_seen_per_cpu: vec![4, 6],
+        events_submitted_per_cpu: vec![3, 6],
+        ring_reserve_failed_per_cpu: vec![1, 0],
+        exec_argv_captured_per_cpu: vec![2, 3],
+    };
+    let mut counters = HealthCounters::default();
+    counters.apply_kernel_sample(&sample).unwrap();
+
+    assert_eq!(counters.events_seen_total, 10);
+    assert_eq!(counters.events_submitted_total, 9);
+    assert_eq!(counters.ring_reserve_failed_total, 1);
+    assert_eq!(counters.exec_argv_captured_total, 5);
+    assert!(counters.kernel_invariant_holds());
+}
 
 #[test]
 fn 所有流水线计数不变量都可检查() {
@@ -59,4 +77,44 @@ fn 生产策略与final状态进入健康快照() {
     let final_snapshot = reporter.snapshot(true);
     assert_eq!(final_snapshot.state, HealthState::Unhealthy);
     assert!(final_snapshot.final_record);
+}
+
+#[test]
+fn 状态变化立即报告且常态每十秒报告() {
+    let mut reporter = HealthReporter::new(ProductionPolicyState::Passed);
+    assert!(reporter.poll(Duration::ZERO).is_some());
+    assert!(reporter.poll(Duration::from_secs(9)).is_none());
+    assert!(reporter.poll(Duration::from_secs(10)).is_some());
+
+    reporter.record_gap("queue_drop", Duration::from_secs(11));
+    let changed = reporter.poll(Duration::from_secs(11)).unwrap();
+    assert_eq!(changed.state, HealthState::Degraded);
+    assert_eq!(changed.reason.as_deref(), Some("queue_drop"));
+}
+
+#[test]
+fn 历史dirty立即产生degraded告警且计数为一() {
+    let mut reporter = HealthReporter::new(ProductionPolicyState::NotRequested);
+    reporter
+        .record_unclean_shutdown(Duration::from_secs(1))
+        .unwrap();
+    let snapshot = reporter.poll(Duration::from_secs(1)).unwrap();
+
+    assert_eq!(snapshot.state, HealthState::Degraded);
+    assert_eq!(snapshot.reason.as_deref(), Some("unclean_shutdown"));
+    assert_eq!(snapshot.counters.unclean_shutdown_detected_total, 1);
+}
+
+#[test]
+fn 内核计数不变量破坏会进入unhealthy() {
+    let mut reporter = HealthReporter::new(ProductionPolicyState::Passed);
+    let invalid = KernelCounterSample {
+        events_seen_per_cpu: vec![10],
+        events_submitted_per_cpu: vec![10],
+        ring_reserve_failed_per_cpu: vec![1],
+        exec_argv_captured_per_cpu: vec![0],
+    };
+
+    assert!(reporter.update_kernel_counters(&invalid).is_err());
+    assert_eq!(reporter.snapshot(false).state, HealthState::Unhealthy);
 }

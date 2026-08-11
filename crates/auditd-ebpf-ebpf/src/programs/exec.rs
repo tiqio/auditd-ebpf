@@ -12,7 +12,8 @@ use aya_ebpf::helpers::{
 };
 
 use crate::maps::{
-    COUNTER_EXEC_ARGV_CAPTURED, COUNTER_EXEC_ARGV_DROPPED, EVENT_COUNTERS, EVENTS,
+    COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED, COUNTER_EXEC_ARGV_CAPTURED,
+    COUNTER_EXEC_ARGV_DROPPED, COUNTER_RINGBUF_DROPPED, EVENT_COUNTERS, EVENTS,
     EXEC_ATTEMPT_SCRATCH, EXEC_ATTEMPTS, EXEC_RESULT_SCRATCH,
 };
 
@@ -107,14 +108,20 @@ pub fn capture_attempt(pid_tgid: u64, argv_pointer: u64, rule_version: u64) {
         }
     }
 
-    if EXEC_ATTEMPTS.insert(pid_tgid, attempt_id, 0).is_err()
-        || EVENTS.output::<ExecAttempt>(&*attempt, 0).is_err()
-    {
+    if EXEC_ATTEMPTS.insert(pid_tgid, attempt_id, 0).is_err() {
         let _ = EXEC_ATTEMPTS.remove(pid_tgid);
         increment_counter(COUNTER_EXEC_ARGV_DROPPED);
-    } else {
-        increment_counter(COUNTER_EXEC_ARGV_CAPTURED);
+        return;
     }
+    increment_counter(COUNTER_EVENTS_SEEN);
+    if EVENTS.output::<ExecAttempt>(&*attempt, 0).is_err() {
+        let _ = EXEC_ATTEMPTS.remove(pid_tgid);
+        increment_counter(COUNTER_RINGBUF_DROPPED);
+        increment_counter(COUNTER_EXEC_ARGV_DROPPED);
+        return;
+    }
+    increment_counter(COUNTER_EVENTS_SUBMITTED);
+    increment_counter(COUNTER_EXEC_ARGV_CAPTURED);
 }
 
 #[inline(never)]
@@ -138,8 +145,12 @@ pub fn emit_result(pid_tgid: u64, result: i64, rule_version: u64) {
     event.attempt_id = attempt_id;
     event.result = result;
     event.new_comm = bpf_get_current_comm().unwrap_or([0; 16]);
+    increment_counter(COUNTER_EVENTS_SEEN);
     if EVENTS.output::<ExecResult>(&*event, 0).is_err() {
+        increment_counter(COUNTER_RINGBUF_DROPPED);
         increment_counter(COUNTER_EXEC_ARGV_DROPPED);
+    } else {
+        increment_counter(COUNTER_EVENTS_SUBMITTED);
     }
     let _ = EXEC_ATTEMPTS.remove(pid_tgid);
 }

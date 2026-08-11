@@ -18,10 +18,10 @@ use aya_ebpf::{
 };
 
 use crate::maps::{
-    ACTIVE_GENERATION, COUNTER_CORRELATION_MISSED, COUNTER_INFLIGHT_DROPPED,
-    COUNTER_RINGBUF_DROPPED, EVENT_COUNTERS, EVENTS, INFLIGHT_SYSCALLS, InflightSyscall,
-    PROCESS_ABI, RULE_VERSIONS, SYSCALL_BITMAPS_B32, SYSCALL_BITMAPS_B64, SYSCALL_EVENT_SCRATCH,
-    SYSCALL_SCRATCH,
+    ACTIVE_GENERATION, COUNTER_CORRELATION_MISSED, COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED,
+    COUNTER_INFLIGHT_DROPPED, COUNTER_INTERNAL_DROPPED, COUNTER_RINGBUF_DROPPED, EVENT_COUNTERS,
+    EVENTS, INFLIGHT_SYSCALLS, InflightSyscall, PROCESS_ABI, RULE_VERSIONS, SYSCALL_BITMAPS_B32,
+    SYSCALL_BITMAPS_B64, SYSCALL_EVENT_SCRATCH, SYSCALL_SCRATCH,
 };
 use crate::programs::exec::{argv_pointer_index, capture_attempt, emit_result, is_exec_syscall};
 
@@ -109,7 +109,7 @@ fn try_sys_exit(context: &RawTracePointContext) -> Result<u32, i32> {
         path_flags |= PATH_FLAG_MOUNT_BOUNDARY_CHANGED;
     }
     let Some(event_pointer) = SYSCALL_EVENT_SCRATCH.get_ptr_mut(0) else {
-        increment_counter(COUNTER_RINGBUF_DROPPED);
+        increment_counter(COUNTER_INTERNAL_DROPPED);
         let _ = INFLIGHT_SYSCALLS.remove(pid_tgid);
         return Ok(0);
     };
@@ -132,8 +132,11 @@ fn try_sys_exit(context: &RawTracePointContext) -> Result<u32, i32> {
     event.path2_len = inflight.path2_len;
     event.path = inflight.path;
     event.path2 = inflight.path2;
+    increment_counter(COUNTER_EVENTS_SEEN);
     if EVENTS.output::<SyscallEvent>(&*event, 0).is_err() {
         increment_counter(COUNTER_RINGBUF_DROPPED);
+    } else {
+        increment_counter(COUNTER_EVENTS_SUBMITTED);
     }
     let _ = INFLIGHT_SYSCALLS.remove(pid_tgid);
     Ok(0)
