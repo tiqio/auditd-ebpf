@@ -1,0 +1,1 @@
+type=AUDITD_EBPF_GAP msg=audit(1786352401.000:43) schema=1 host="node-a" machine_id=0123456789abcdef0123456789abcdef event_id="boot:43" reason=unclean_shutdown count=? first_seen=1786352401000 last_seen=1786352401000

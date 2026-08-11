@@ -1,0 +1,1 @@
+type=AUDITD_EBPF_DIAG host="node-a" machine_id=0123456789abcdef0123456789abcdef level=error code=path_stale component=process_cache message="context expired"
