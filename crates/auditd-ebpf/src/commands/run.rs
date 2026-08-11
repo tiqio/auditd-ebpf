@@ -8,6 +8,7 @@ pub fn run(
     deployment_mode: DeploymentMode,
     risk_acceptance_path: Option<&Path>,
     ebpf_object: Option<&Path>,
+    rules_dir: &Path,
 ) -> i32 {
     if deployment_mode == DeploymentMode::Production {
         let Some(path) = risk_acceptance_path else {
@@ -24,5 +25,5 @@ pub fn run(
             return 9;
         }
     }
-    crate::runtime::run(node_name, lifecycle_path, ebpf_object)
+    crate::runtime::run(node_name, lifecycle_path, ebpf_object, rules_dir)
 }

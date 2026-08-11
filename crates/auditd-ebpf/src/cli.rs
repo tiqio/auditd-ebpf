@@ -28,6 +28,8 @@ pub enum Command {
         risk_acceptance_file: Option<PathBuf>,
         #[arg(long)]
         ebpf_object: Option<PathBuf>,
+        #[arg(long, default_value = "/etc/audit/rules.d")]
+        rules_dir: PathBuf,
     },
     CheckRules {
         #[arg(long, conflicts_with = "rules_dir")]

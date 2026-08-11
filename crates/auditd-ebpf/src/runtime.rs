@@ -1,3 +1,6 @@
+use auditd_ebpf_rules::{
+    Arch, KernelFilterPlan, RuleCompiler, parse_rules, source::sorted_rule_files, syscall_name,
+};
 use std::{
     collections::BTreeMap,
     fs,
@@ -14,13 +17,19 @@ use std::{
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::{
+    collector::decode::{KernelRecord, decode_owned},
     identity::{HostIdentity, MachineIdSource},
     lifecycle::{
         model::{LifecycleMarker, LifecycleState},
         state_file::LifecycleStateFile,
     },
     loader::LoadedBpf,
+    output::event_formatter::{AuditEvent, format_event},
     output::status_formatter::{status, unclean_shutdown_gap},
+    rules::{
+        argv_policy::EffectiveArgvOutput,
+        engine::{CandidateEvent, RuleEngine},
+    },
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -96,7 +105,12 @@ pub fn drain_with_timeout(timeout: Duration, mut is_empty: impl FnMut() -> bool)
     }
 }
 
-pub fn run(node_name: Option<&str>, lifecycle_path: &Path, ebpf_object: Option<&Path>) -> i32 {
+pub fn run(
+    node_name: Option<&str>,
+    lifecycle_path: &Path,
+    ebpf_object: Option<&Path>,
+    rules_dir: &Path,
+) -> i32 {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -107,13 +121,14 @@ pub fn run(node_name: Option<&str>, lifecycle_path: &Path, ebpf_object: Option<&
             return 7;
         }
     };
-    runtime.block_on(run_async(node_name, lifecycle_path, ebpf_object))
+    runtime.block_on(run_async(node_name, lifecycle_path, ebpf_object, rules_dir))
 }
 
 async fn run_async(
     node_name: Option<&str>,
     lifecycle_path: &Path,
     ebpf_object: Option<&Path>,
+    rules_dir: &Path,
 ) -> i32 {
     // 信号 fd 必须在任何可能耗时的 load/attach 前注册。否则 dirty 已持久化但 attach 尚未完成
     // 的窗口里，SIGTERM 会执行默认动作，绕过排空与最终状态逻辑。
@@ -145,6 +160,27 @@ async fn run_async(
             return 6;
         }
     };
+    let mut active_plan = None;
+    if let Some(loaded) = loaded_bpf.as_mut() {
+        let plan = match compile_rules(rules_dir) {
+            Ok(plan) => plan,
+            Err(error) => {
+                eprintln!(
+                    "type=AUDITD_EBPF_DIAG level=error code=rule_invalid component=runtime message={error:?}"
+                );
+                return 3;
+            }
+        };
+        // 规则 bitmap 与版本必须在 attach 前完成 staging；否则程序会以全零 bitmap 启动，
+        // 造成静默漏报并使任何性能数据失去正确性前提。
+        if let Err(error) = loaded.stage_rules(&plan) {
+            eprintln!(
+                "type=AUDITD_EBPF_DIAG level=error code=rule_stage component=runtime message={error:?}"
+            );
+            return 6;
+        }
+        active_plan = Some(plan);
+    }
     let state_file = LifecycleStateFile::new(lifecycle_path);
     let previous = match state_file.read() {
         Ok(marker) => marker,
@@ -167,6 +203,7 @@ async fn run_async(
         return 4;
     }
 
+    let identity = resolve_identity(node_name);
     let mut collector = if let Some(loaded) = loaded_bpf.as_mut() {
         if let Err(error) = loaded.attach_collection_programs() {
             eprintln!(
@@ -175,7 +212,11 @@ async fn run_async(
             return 6;
         }
         match loaded.take_ring() {
-            Ok(ring) => Some(KernelCollector::start(ring)),
+            Ok(ring) => Some(KernelCollector::start(
+                ring,
+                active_plan.expect("加载 eBPF 时规则计划已编译"),
+                identity.clone(),
+            )),
             Err(error) => {
                 eprintln!(
                     "type=AUDITD_EBPF_DIAG level=error code=ringbuf_open component=runtime message={error:?}"
@@ -187,7 +228,6 @@ async fn run_async(
         None
     };
 
-    let identity = resolve_identity(node_name);
     if previous_dirty {
         let line = unclean_shutdown_gap(
             &identity,
@@ -249,6 +289,24 @@ async fn run_async(
     drain.exit_code()
 }
 
+fn compile_rules(rules_dir: &Path) -> anyhow::Result<auditd_ebpf_rules::KernelFilterPlan> {
+    let paths = sorted_rule_files(rules_dir).map_err(anyhow::Error::new)?;
+    anyhow::ensure!(
+        !paths.is_empty(),
+        "规则目录 {} 不包含 .rules 文件",
+        rules_dir.display()
+    );
+    let mut rules = Vec::new();
+    for path in paths {
+        let input = fs::read_to_string(&path)?;
+        rules.extend(parse_rules(&path.display().to_string(), &input).map_err(anyhow::Error::new)?);
+    }
+    for (index, rule) in rules.iter_mut().enumerate() {
+        rule.rule_id = index as u32;
+    }
+    RuleCompiler::compile(rules, 0, Default::default()).map_err(anyhow::Error::new)
+}
+
 struct KernelCollector {
     stop: Arc<AtomicBool>,
     consumed: Arc<AtomicU64>,
@@ -256,17 +314,30 @@ struct KernelCollector {
 }
 
 impl KernelCollector {
-    fn start(mut ring: aya::maps::RingBuf<aya::maps::MapData>) -> Self {
+    fn start(
+        mut ring: aya::maps::RingBuf<aya::maps::MapData>,
+        plan: KernelFilterPlan,
+        identity: HostIdentity,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let consumed = Arc::new(AtomicU64::new(0));
         let thread_stop = Arc::clone(&stop);
         let thread_consumed = Arc::clone(&consumed);
         let thread = thread::spawn(move || {
+            let engine = RuleEngine::new(plan, true);
+            let mut output_sequence = 0_u64;
             loop {
                 let mut drained = false;
-                while ring.next().is_some() {
+                while let Some(item) = ring.next() {
                     drained = true;
                     thread_consumed.fetch_add(1, Ordering::Relaxed);
+                    if let Ok(KernelRecord::Syscall(event)) = decode_owned(&item)
+                        && let Some(line) =
+                            format_syscall_record(&engine, &identity, &event, output_sequence)
+                    {
+                        let _ = io::stdout().write_all(line.as_bytes());
+                        output_sequence = output_sequence.wrapping_add(1);
+                    }
                 }
                 if thread_stop.load(Ordering::Acquire) && !drained {
                     break;
@@ -303,6 +374,78 @@ impl KernelCollector {
     fn consumed(&self) -> u64 {
         self.consumed.load(Ordering::Relaxed)
     }
+}
+
+fn format_syscall_record(
+    engine: &RuleEngine,
+    identity: &HostIdentity,
+    event: &auditd_ebpf_common::event::SyscallEvent,
+    output_sequence: u64,
+) -> Option<String> {
+    let arch = match event.arch {
+        0xc000_003e => Arch::B64,
+        0x4000_0003 => Arch::B32,
+        _ => return None,
+    };
+    let syscall = syscall_name(arch, event.syscall_nr)?;
+    let path_length = usize::from(event.path_len).min(event.path.len());
+    let path_bytes = &event.path[..path_length];
+    let path = if path_bytes.is_empty() {
+        None
+    } else {
+        Some(Path::new(std::str::from_utf8(path_bytes).ok()?))
+    };
+    let mut candidate = CandidateEvent::new(arch, syscall)
+        .with_identity(event.uid, event.gid)
+        .with_success(event.return_value >= 0);
+    if let Some(path) = path {
+        candidate = candidate.with_path(path);
+    }
+    let matched = engine.evaluate(&candidate)?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let pid = (event.header.pid_tgid >> 32) as u32;
+    let event_id = format!("{}-{output_sequence}", event.header.cpu);
+    let comm_length = event
+        .comm
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(event.comm.len());
+    Some(format_event(&AuditEvent {
+        unix_seconds: now.as_secs(),
+        millis: now.subsec_millis() as u16,
+        sequence: output_sequence,
+        host: identity.host.as_bytes(),
+        machine_id: &identity.machine_id,
+        event_id: event_id.as_bytes(),
+        rule_version: event.header.rule_version,
+        rule_id: matched.rule.rule_id,
+        key: matched.rule.key.as_bytes(),
+        arch: event.arch,
+        syscall,
+        operation: "syscall",
+        success: event.return_value >= 0,
+        exit: event.return_value,
+        pid,
+        ppid: event.ppid,
+        uid: event.uid,
+        gid: event.gid,
+        euid: event.euid,
+        egid: event.egid,
+        comm: &event.comm[..comm_length],
+        exe: b"",
+        path: path_bytes,
+        perm: "",
+        argv_output: match matched.argv_output {
+            EffectiveArgvOutput::Emitted => EffectiveArgvOutput::Emitted,
+            EffectiveArgvOutput::Suppressed => EffectiveArgvOutput::Suppressed,
+        },
+        argc: 0,
+        argv: &[],
+        argv_truncated: false,
+        path_confidence: if path.is_some() { "lexical" } else { "none" },
+    }))
 }
 
 fn resolve_identity(node_name: Option<&str>) -> HostIdentity {

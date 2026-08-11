@@ -1,13 +1,14 @@
 //! 固定随机顺序、样本配额与污染判定。
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{BenchmarkSample, SampleStatus},
     report::randomized_order,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScheduledRun {
     pub sequence: usize,
     pub implementation: String,

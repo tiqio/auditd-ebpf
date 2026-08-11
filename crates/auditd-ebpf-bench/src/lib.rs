@@ -6,6 +6,7 @@
 pub mod cli;
 pub mod correctness;
 pub mod environment;
+pub mod executor;
 pub mod metrics;
 pub mod model;
 pub mod modes;

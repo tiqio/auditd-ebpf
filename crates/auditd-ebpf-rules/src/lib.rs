@@ -14,7 +14,7 @@ pub use compiler::RuleCompiler;
 pub use diagnostic::{Diagnostic, RuleErrors};
 pub use model::{Arch, ArgvOutput, AuditRule, KernelFilterPlan, RuleKind, RuleSet};
 pub use parser::parse_rules;
-pub use syscalls::syscall_number;
+pub use syscalls::{syscall_name, syscall_number};
 
 pub const MAX_RULES: usize = 4_096;
 

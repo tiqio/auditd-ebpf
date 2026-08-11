@@ -18,6 +18,7 @@ pub fn execute() -> i32 {
         deployment_mode: crate::cli::DeploymentMode::NonProduction,
         risk_acceptance_file: None,
         ebpf_object: None,
+        rules_dir: "/etc/audit/rules.d".into(),
     }) {
         Command::Run {
             node_name,
@@ -25,12 +26,14 @@ pub fn execute() -> i32 {
             deployment_mode,
             risk_acceptance_file,
             ebpf_object,
+            rules_dir,
         } => run::run(
             node_name.as_deref(),
             &lifecycle_state_file,
             deployment_mode,
             risk_acceptance_file.as_deref(),
             ebpf_object.as_deref(),
+            &rules_dir,
         ),
         Command::CheckRules {
             rules_file,
