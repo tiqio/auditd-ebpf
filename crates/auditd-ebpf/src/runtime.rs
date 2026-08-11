@@ -17,7 +17,7 @@ use std::{
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::{
-    collector::decode::{KernelRecord, decode_owned},
+    collector::runtime::{CollectedRecord, CollectorRuntime, CorrelatedExec},
     identity::{HostIdentity, MachineIdSource},
     lifecycle::{
         model::{LifecycleMarker, LifecycleState},
@@ -325,18 +325,42 @@ impl KernelCollector {
         let thread_consumed = Arc::clone(&consumed);
         let thread = thread::spawn(move || {
             let engine = RuleEngine::new(plan, true);
+            let mut collector_runtime = CollectorRuntime::new(65_536, Duration::from_secs(30));
+            let mut completed_execs = BTreeMap::<u64, CorrelatedExec>::new();
             let mut output_sequence = 0_u64;
+            // collector 是 stdout 的唯一审计事件写入者，在线程生命周期内持有锁可避免
+            // 每条事件重复获取全局 stdout mutex；journald 仍以换行分隔完整记录。
+            let stdout = io::stdout();
+            let mut stdout = stdout.lock();
             loop {
                 let mut drained = false;
                 while let Some(item) = ring.next() {
                     drained = true;
                     thread_consumed.fetch_add(1, Ordering::Relaxed);
-                    if let Ok(KernelRecord::Syscall(event)) = decode_owned(&item)
-                        && let Some(line) =
-                            format_syscall_record(&engine, &identity, &event, output_sequence)
-                    {
-                        let _ = io::stdout().write_all(line.as_bytes());
-                        output_sequence = output_sequence.wrapping_add(1);
+                    if collector_runtime.accept(&item).is_ok() {
+                        for record in collector_runtime.take_output() {
+                            match record {
+                                CollectedRecord::Exec(exec) => {
+                                    completed_execs.insert(exec.process, exec);
+                                }
+                                CollectedRecord::Kernel(
+                                    crate::collector::decode::KernelRecord::Syscall(event),
+                                ) => {
+                                    let correlated = completed_execs.remove(&event.header.pid_tgid);
+                                    if let Some(line) = format_syscall_record(
+                                        &engine,
+                                        &identity,
+                                        &event,
+                                        correlated.as_ref(),
+                                        output_sequence,
+                                    ) {
+                                        let _ = stdout.write_all(line.as_bytes());
+                                        output_sequence = output_sequence.wrapping_add(1);
+                                    }
+                                }
+                                CollectedRecord::Kernel(_) | CollectedRecord::Gap(_) => {}
+                            }
+                        }
                     }
                 }
                 if thread_stop.load(Ordering::Acquire) && !drained {
@@ -344,6 +368,7 @@ impl KernelCollector {
                 }
                 thread::sleep(Duration::from_millis(1));
             }
+            let _ = stdout.flush();
         });
         Self {
             stop,
@@ -380,6 +405,7 @@ fn format_syscall_record(
     engine: &RuleEngine,
     identity: &HostIdentity,
     event: &auditd_ebpf_common::event::SyscallEvent,
+    correlated_exec: Option<&CorrelatedExec>,
     output_sequence: u64,
 ) -> Option<String> {
     let arch = match event.arch {
@@ -441,9 +467,9 @@ fn format_syscall_record(
             EffectiveArgvOutput::Emitted => EffectiveArgvOutput::Emitted,
             EffectiveArgvOutput::Suppressed => EffectiveArgvOutput::Suppressed,
         },
-        argc: 0,
-        argv: &[],
-        argv_truncated: false,
+        argc: correlated_exec.map_or(0, |exec| exec.observed_argc),
+        argv: correlated_exec.map_or(&[], |exec| exec.argv.as_slice()),
+        argv_truncated: correlated_exec.is_some_and(|exec| exec.argv_flags != 0),
         path_confidence: if path.is_some() { "lexical" } else { "none" },
     }))
 }

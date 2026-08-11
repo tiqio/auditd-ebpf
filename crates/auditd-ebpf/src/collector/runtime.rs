@@ -25,6 +25,7 @@ pub struct CorrelatedExec {
     pub result: i64,
     pub argv: Vec<Vec<u8>>,
     pub observed_argc: u32,
+    pub argv_flags: u16,
 }
 
 pub enum CollectedRecord {
@@ -73,10 +74,13 @@ impl CollectorRuntime {
     fn accept_attempt(&mut self, attempt: &ExecAttempt) {
         let process = attempt.header.pid_tgid;
         let argv = decode_argv(attempt);
-        if self
-            .pending
-            .insert(process, attempt.attempt_id, argv, attempt.argc_observed)
-            == Err(PendingError::AtCapacity)
+        if self.pending.insert(
+            process,
+            attempt.attempt_id,
+            argv,
+            attempt.argc_observed,
+            attempt.argv_flags,
+        ) == Err(PendingError::AtCapacity)
         {
             self.output
                 .push(CollectedRecord::Gap(CollectorGap::PendingCapacity));
@@ -88,6 +92,7 @@ impl CollectorRuntime {
         if let Some(PendingExec {
             argv,
             observed_argc,
+            argv_flags,
             ..
         }) = self.pending.complete(process, result.attempt_id)
         {
@@ -97,6 +102,7 @@ impl CollectorRuntime {
                 result: result.result,
                 argv,
                 observed_argc,
+                argv_flags,
             }));
         } else {
             self.output

@@ -56,6 +56,7 @@ fn correlates_exec_and_releases_argv_after_result() {
         panic!("应得到关联 exec")
     };
     assert_eq!(exec.argv, [b"cmd".to_vec(), b"arg".to_vec()]);
+    assert_eq!(exec.argv_flags, 0);
     runtime.accept(bytes(&result)).unwrap();
     assert!(matches!(runtime.take_output()[0], CollectedRecord::Gap(_)));
 }

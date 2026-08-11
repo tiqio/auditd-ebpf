@@ -9,6 +9,7 @@ use thiserror::Error;
 pub struct PendingExec {
     pub argv: Vec<Vec<u8>>,
     pub observed_argc: u32,
+    pub argv_flags: u16,
     inserted_at: Instant,
 }
 
@@ -38,8 +39,16 @@ impl ExecPending {
         attempt: u64,
         argv: Vec<Vec<u8>>,
         observed_argc: u32,
+        argv_flags: u16,
     ) -> Result<(), PendingError> {
-        self.insert_at(process, attempt, argv, observed_argc, Instant::now())
+        self.insert_at(
+            process,
+            attempt,
+            argv,
+            observed_argc,
+            argv_flags,
+            Instant::now(),
+        )
     }
     pub fn insert_at(
         &mut self,
@@ -47,6 +56,7 @@ impl ExecPending {
         attempt: u64,
         argv: Vec<Vec<u8>>,
         observed_argc: u32,
+        argv_flags: u16,
         inserted_at: Instant,
     ) -> Result<(), PendingError> {
         if self.entries.len() >= self.capacity {
@@ -57,6 +67,7 @@ impl ExecPending {
             PendingExec {
                 argv,
                 observed_argc,
+                argv_flags,
                 inserted_at,
             },
         );
