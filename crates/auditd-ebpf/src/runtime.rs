@@ -18,6 +18,7 @@ use std::{
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::{
+    capabilities::drop_runtime_capabilities,
     collector::runtime::{CollectedRecord, CollectorGap, CollectorRuntime, CorrelatedExec},
     identity::{HostIdentity, MachineIdSource},
     lifecycle::{
@@ -220,7 +221,7 @@ async fn run_async(
     }
 
     let identity = resolve_identity(node_name);
-    let mut collector = if let Some(loaded) = loaded_bpf.as_mut() {
+    let collector_resources = if let Some(loaded) = loaded_bpf.as_mut() {
         if let Err(error) = loaded.attach_collection_programs() {
             eprintln!(
                 "type=AUDITD_EBPF_DIAG level=error code=ebpf_attach component=runtime message={error:?}"
@@ -228,12 +229,7 @@ async fn run_async(
             return 6;
         }
         match loaded.take_ring() {
-            Ok(ring) => Some(KernelCollector::start(
-                ring,
-                active_plan.expect("加载 eBPF 时规则计划已编译"),
-                identity.clone(),
-                global_argv_enabled,
-            )),
+            Ok(ring) => Some((ring, active_plan.expect("加载 eBPF 时规则计划已编译"))),
             Err(error) => {
                 eprintln!(
                     "type=AUDITD_EBPF_DIAG level=error code=ringbuf_open component=runtime message={error:?}"
@@ -244,6 +240,18 @@ async fn run_async(
     } else {
         None
     };
+
+    // 所有需要特权的 BPF load/attach、map 与 RingBuf fd 获取已经结束。能力降级必须发生在
+    // collector 线程创建之前，因为 Linux capability 是线程凭据，新线程只会继承当前集合。
+    if let Err(error) = drop_runtime_capabilities() {
+        eprintln!(
+            "type=AUDITD_EBPF_DIAG level=error code=capability_drop component=runtime message={error:?}"
+        );
+        return 6;
+    }
+    let mut collector = collector_resources.map(|(ring, plan)| {
+        KernelCollector::start(ring, plan, identity.clone(), global_argv_enabled)
+    });
 
     if previous_dirty {
         let line = unclean_shutdown_gap(

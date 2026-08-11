@@ -19,8 +19,9 @@ StandardError=journal
 SyslogIdentifier=auditd-ebpf
 
 # CAP_SYS_ADMIN 只保留为旧内核兼容边界；程序完成能力探测后必须主动删除该回退能力。
-CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN
-AmbientCapabilities=CAP_BPF CAP_PERFMON
+# CAP_SETPCAP 仅用于初始化结束时主动清空 bounding set，随后与所有其他 capability 一并删除。
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN CAP_SETPCAP
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SETPCAP
 NoNewPrivileges=yes
 LimitMEMLOCK=infinity
 

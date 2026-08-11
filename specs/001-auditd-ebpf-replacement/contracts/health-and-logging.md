@@ -74,12 +74,14 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=auditd-ebpf
 NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN
-AmbientCapabilities=CAP_BPF CAP_PERFMON
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN CAP_SETPCAP
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SETPCAP
 LimitMEMLOCK=infinity
 ```
 
-- `CAP_SYS_ADMIN` 仅作为兼容回退；能力探测通过后进程必须从 effective/permitted 集合删除。
+- `CAP_SYS_ADMIN` 仅作为兼容回退；`CAP_SETPCAP` 仅用于初始化结束时删除 bounding set。
+  所有 eBPF fd 打开且 attach 完成后，进程必须锁定 securebits、清空 bounding/ambient/
+  effective/permitted/inheritable 集合，并保持 `NoNewPrivileges`，运行期不得保留 capability。
 - `ProtectSystem=strict` 下只读规则和配置，允许写入的路径仅限运行目录、
   `/var/lib/auditd-ebpf` 生命周期目录和可选基准输出目录。
 - 发行包不得同时自动启动 auditd 与 auditd-ebpf。
