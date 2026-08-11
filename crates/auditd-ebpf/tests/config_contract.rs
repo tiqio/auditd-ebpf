@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use auditd_ebpf::config::model::{Config, ConfigLayer, EffectiveConfig};
+use auditd_ebpf::config::model::{
+    ArgvConfigLayer, ArgvRuleConfig, Config, ConfigLayer, EffectiveConfig,
+};
 
 #[test]
 fn higher_precedence_overrides_lower_layers() {
@@ -29,4 +31,33 @@ fn rejects_queue_and_ring_capacity_out_of_range() {
         ..ConfigLayer::default()
     };
     assert!(EffectiveConfig::merge(Config::default(), [&layer]).is_err());
+}
+
+#[test]
+fn argv全局和按key策略按层覆盖() {
+    let file = ConfigLayer {
+        argv: Some(ArgvConfigLayer {
+            enabled: Some(false),
+            rules: [("full-command".into(), ArgvRuleConfig { enabled: true })]
+                .into_iter()
+                .collect(),
+        }),
+        ..ConfigLayer::default()
+    };
+
+    let effective = EffectiveConfig::merge(Config::default(), [&file]).unwrap();
+    assert!(!effective.argv_enabled);
+    assert!(effective.argv_rules["full-command"]);
+}
+
+#[test]
+fn argv策略toml结构可严格解析() {
+    let layer: ConfigLayer =
+        toml::from_str("[argv]\nenabled = false\n[argv.rules.full-command]\nenabled = true\n")
+            .unwrap();
+    let effective = EffectiveConfig::merge(Config::default(), [&layer]).unwrap();
+
+    assert!(!effective.argv_enabled);
+    assert!(effective.argv_rules["full-command"]);
+    assert!(toml::from_str::<ConfigLayer>("[argv]\nunknown = true\n").is_err());
 }

@@ -1,5 +1,6 @@
 use auditd_ebpf_rules::{
-    Arch, KernelFilterPlan, RuleCompiler, parse_rules, source::sorted_rule_files, syscall_name,
+    Arch, ArgvOutput, KernelFilterPlan, RuleCompiler, parse_rules, source::sorted_rule_files,
+    syscall_name,
 };
 use std::{
     collections::BTreeMap,
@@ -114,6 +115,8 @@ pub fn run(
     lifecycle_path: &Path,
     ebpf_object: Option<&Path>,
     rules_dir: &Path,
+    global_argv_enabled: bool,
+    argv_rules: &BTreeMap<String, bool>,
 ) -> i32 {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -125,7 +128,14 @@ pub fn run(
             return 7;
         }
     };
-    runtime.block_on(run_async(node_name, lifecycle_path, ebpf_object, rules_dir))
+    runtime.block_on(run_async(
+        node_name,
+        lifecycle_path,
+        ebpf_object,
+        rules_dir,
+        global_argv_enabled,
+        argv_rules,
+    ))
 }
 
 async fn run_async(
@@ -133,6 +143,8 @@ async fn run_async(
     lifecycle_path: &Path,
     ebpf_object: Option<&Path>,
     rules_dir: &Path,
+    global_argv_enabled: bool,
+    argv_rules: &BTreeMap<String, bool>,
 ) -> i32 {
     // 信号 fd 必须在任何可能耗时的 load/attach 前注册。否则 dirty 已持久化但 attach 尚未完成
     // 的窗口里，SIGTERM 会执行默认动作，绕过排空与最终状态逻辑。
@@ -166,7 +178,7 @@ async fn run_async(
     };
     let mut active_plan = None;
     if let Some(loaded) = loaded_bpf.as_mut() {
-        let plan = match compile_rules(rules_dir) {
+        let plan = match compile_rules(rules_dir, argv_rules) {
             Ok(plan) => plan,
             Err(error) => {
                 eprintln!(
@@ -220,6 +232,7 @@ async fn run_async(
                 ring,
                 active_plan.expect("加载 eBPF 时规则计划已编译"),
                 identity.clone(),
+                global_argv_enabled,
             )),
             Err(error) => {
                 eprintln!(
@@ -294,7 +307,10 @@ async fn run_async(
     drain.exit_code()
 }
 
-fn compile_rules(rules_dir: &Path) -> anyhow::Result<auditd_ebpf_rules::KernelFilterPlan> {
+fn compile_rules(
+    rules_dir: &Path,
+    argv_rules: &BTreeMap<String, bool>,
+) -> anyhow::Result<auditd_ebpf_rules::KernelFilterPlan> {
     let paths = sorted_rule_files(rules_dir).map_err(anyhow::Error::new)?;
     anyhow::ensure!(
         !paths.is_empty(),
@@ -309,7 +325,20 @@ fn compile_rules(rules_dir: &Path) -> anyhow::Result<auditd_ebpf_rules::KernelFi
     for (index, rule) in rules.iter_mut().enumerate() {
         rule.rule_id = index as u32;
     }
-    RuleCompiler::compile(rules, 0, Default::default()).map_err(anyhow::Error::new)
+    let overrides = argv_rules
+        .iter()
+        .map(|(key, enabled)| {
+            (
+                key.clone(),
+                if *enabled {
+                    ArgvOutput::Enabled
+                } else {
+                    ArgvOutput::Disabled
+                },
+            )
+        })
+        .collect();
+    RuleCompiler::compile(rules, 0, overrides).map_err(anyhow::Error::new)
 }
 
 struct KernelCollector {
@@ -366,13 +395,16 @@ impl KernelCollector {
         mut ring: aya::maps::RingBuf<aya::maps::MapData>,
         plan: KernelFilterPlan,
         identity: HostIdentity,
+        global_argv_enabled: bool,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let counters = Arc::new(CollectorCounters::default());
         let thread_stop = Arc::clone(&stop);
         let thread_counters = Arc::clone(&counters);
         let thread = thread::spawn(move || {
-            let engine = RuleEngine::new(plan, true);
+            // 按 key 策略已由 RuleCompiler 写入对应规则；全局开关只决定 Inherit 的最终值。
+            // 无论最终是否输出，内核侧仍捕获 argv，抑制仅发生在用户态 first-match 之后。
+            let engine = RuleEngine::new(plan, global_argv_enabled);
             let mut collector_runtime = CollectorRuntime::new(65_536, Duration::from_secs(30));
             let mut completed_execs = BTreeMap::<u64, CorrelatedExec>::new();
             let mut output_sequence = 0_u64;

@@ -19,6 +19,8 @@ pub struct Cli {
 pub enum Command {
     Run {
         #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
         node_name: Option<String>,
         #[arg(long, default_value = "/var/lib/auditd-ebpf/lifecycle.toml")]
         lifecycle_state_file: PathBuf,
@@ -30,6 +32,10 @@ pub enum Command {
         ebpf_object: Option<PathBuf>,
         #[arg(long, default_value = "/etc/audit/rules.d")]
         rules_dir: PathBuf,
+        #[arg(long, conflicts_with = "no_emit_argv")]
+        emit_argv: bool,
+        #[arg(long, conflicts_with = "emit_argv")]
+        no_emit_argv: bool,
     },
     CheckRules {
         #[arg(long, conflicts_with = "rules_dir")]
@@ -49,4 +55,33 @@ pub enum Command {
     },
     PrintCapabilities,
     BenchmarkInfo,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command};
+
+    #[test]
+    fn argv开关默认继承配置且显式关闭可解析() {
+        let cli = Cli::try_parse_from(["auditd-ebpf", "run", "--no-emit-argv"]).unwrap();
+        let Some(Command::Run {
+            emit_argv,
+            no_emit_argv,
+            ..
+        }) = cli.command
+        else {
+            panic!("应解析为 run 子命令");
+        };
+        assert!(!emit_argv);
+        assert!(no_emit_argv);
+    }
+
+    #[test]
+    fn argv开启和关闭不能同时指定() {
+        assert!(
+            Cli::try_parse_from(["auditd-ebpf", "run", "--emit-argv", "--no-emit-argv"]).is_err()
+        );
+    }
 }

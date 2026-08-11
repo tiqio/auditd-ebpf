@@ -60,3 +60,32 @@ fn directory_matching_obeys_component_boundaries_and_argv_policy() {
     );
     assert!(engine.evaluate(&outside).is_none());
 }
+
+#[test]
+fn 按key开启策略优先于全局关闭() {
+    let rules = parse_rules(
+        "engine.rules",
+        "-a always,exit -F arch=b64 -S execve -k visible\n",
+    )
+    .unwrap();
+    let plan = RuleCompiler::compile(
+        rules,
+        0,
+        [("visible".to_owned(), ArgvOutput::Enabled)].into(),
+    )
+    .unwrap();
+    assert!(plan.exec_capture_enabled, "关闭输出不得关闭内核 argv 采集");
+    let overridden_engine = RuleEngine::new(plan, false);
+    let event = CandidateEvent::new(auditd_ebpf_rules::Arch::B64, "execve");
+
+    assert_eq!(
+        overridden_engine.evaluate(&event).unwrap().argv_output,
+        EffectiveArgvOutput::Emitted
+    );
+
+    let inherited = engine("-a always,exit -F arch=b64 -S execve -k inherited\n", false);
+    assert_eq!(
+        inherited.evaluate(&event).unwrap().argv_output,
+        EffectiveArgvOutput::Suppressed
+    );
+}

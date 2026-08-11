@@ -13,28 +13,37 @@ mod run;
 pub fn execute() -> i32 {
     let cli = Cli::parse();
     match cli.command.unwrap_or(Command::Run {
+        config: None,
         node_name: None,
         lifecycle_state_file: "/var/lib/auditd-ebpf/lifecycle.toml".into(),
         deployment_mode: crate::cli::DeploymentMode::NonProduction,
         risk_acceptance_file: None,
         ebpf_object: None,
         rules_dir: "/etc/audit/rules.d".into(),
+        emit_argv: false,
+        no_emit_argv: false,
     }) {
         Command::Run {
+            config,
             node_name,
             lifecycle_state_file,
             deployment_mode,
             risk_acceptance_file,
             ebpf_object,
             rules_dir,
-        } => run::run(
-            node_name.as_deref(),
-            &lifecycle_state_file,
+            emit_argv,
+            no_emit_argv,
+        } => run::run(run::RunOptions {
+            config_path: config.as_deref(),
+            node_name: node_name.as_deref(),
+            lifecycle_path: &lifecycle_state_file,
             deployment_mode,
-            risk_acceptance_file.as_deref(),
-            ebpf_object.as_deref(),
-            &rules_dir,
-        ),
+            risk_acceptance_path: risk_acceptance_file.as_deref(),
+            ebpf_object: ebpf_object.as_deref(),
+            rules_dir: &rules_dir,
+            emit_argv,
+            no_emit_argv,
+        }),
         Command::CheckRules {
             rules_file,
             rules_dir,

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -10,6 +10,8 @@ pub struct Config {
     pub ring_buffer_bytes: usize,
     pub queue_initial_bytes: usize,
     pub queue_max_bytes: usize,
+    pub argv_enabled: bool,
+    pub argv_rules: BTreeMap<String, bool>,
 }
 
 impl Default for Config {
@@ -20,6 +22,8 @@ impl Default for Config {
             ring_buffer_bytes: 16 * 1024 * 1024,
             queue_initial_bytes: 64 * 1024 * 1024,
             queue_max_bytes: 512 * 1024 * 1024,
+            argv_enabled: true,
+            argv_rules: BTreeMap::new(),
         }
     }
 }
@@ -32,6 +36,21 @@ pub struct ConfigLayer {
     pub ring_buffer_bytes: Option<usize>,
     pub queue_initial_bytes: Option<usize>,
     pub queue_max_bytes: Option<usize>,
+    pub argv: Option<ArgvConfigLayer>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArgvConfigLayer {
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub rules: BTreeMap<String, ArgvRuleConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArgvRuleConfig {
+    pub enabled: bool,
 }
 
 pub type EffectiveConfig = Config;
@@ -66,6 +85,14 @@ impl Config {
             }
             if let Some(value) = layer.queue_max_bytes {
                 current.queue_max_bytes = value;
+            }
+            if let Some(argv) = &layer.argv {
+                if let Some(enabled) = argv.enabled {
+                    current.argv_enabled = enabled;
+                }
+                for (key, policy) in &argv.rules {
+                    current.argv_rules.insert(key.clone(), policy.enabled);
+                }
             }
         }
         current.validate()?;
