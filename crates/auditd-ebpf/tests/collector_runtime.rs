@@ -1,4 +1,7 @@
-use std::{mem::size_of, time::Duration};
+use std::{
+    mem::size_of,
+    time::{Duration, Instant},
+};
 
 use auditd_ebpf::collector::runtime::{CollectedRecord, CollectorRuntime};
 use auditd_ebpf_common::{
@@ -54,5 +57,22 @@ fn correlates_exec_and_releases_argv_after_result() {
     };
     assert_eq!(exec.argv, [b"cmd".to_vec(), b"arg".to_vec()]);
     runtime.accept(bytes(&result)).unwrap();
+    assert!(matches!(runtime.take_output()[0], CollectedRecord::Gap(_)));
+}
+
+#[test]
+fn missing_result_expires_to_gap_and_releases_argv() {
+    let attempt = ExecAttempt {
+        header: header(RecordType::ExecAttempt, size_of::<ExecAttempt>()),
+        attempt_id: 4,
+        argc_observed: 1,
+        argc_captured: 1,
+        argv_flags: 0,
+        argv_offsets: [0; 33],
+        argv_bytes: [0; 6144],
+    };
+    let mut runtime = CollectorRuntime::new(8, Duration::ZERO);
+    runtime.accept(bytes(&attempt)).unwrap();
+    runtime.expire(Instant::now());
     assert!(matches!(runtime.take_output()[0], CollectedRecord::Gap(_)));
 }

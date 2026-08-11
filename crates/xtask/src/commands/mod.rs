@@ -10,7 +10,11 @@ use auditd_ebpf::{
     collector::decode::{KernelRecord, decode_owned},
     loader::LoadedBpf,
 };
-use auditd_ebpf_rules::{RuleCompiler, parse_rules};
+use auditd_ebpf_common::event::{
+    EXEC_ARGV_FLAG_ARGC_TRUNCATED, EXEC_ARGV_FLAG_ARGUMENT_TRUNCATED, PROCESS_EVENT_EXEC,
+    PROCESS_EVENT_EXIT, PROCESS_EVENT_FORK,
+};
+use auditd_ebpf_rules::{ArgvOutput, RuleCompiler, parse_rules};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -69,7 +73,11 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         "kernel-smoke.rules",
         "-a always,exit -F arch=b64 -S execve -k kernel-smoke\n",
     )?;
-    let plan = RuleCompiler::compile(rules, 0, BTreeMap::new())?;
+    let plan = RuleCompiler::compile(
+        rules,
+        0,
+        BTreeMap::from([("kernel-smoke".to_owned(), ArgvOutput::Disabled)]),
+    )?;
     let expected_version = u64::from_le_bytes(plan.version_hash[..8].try_into().unwrap());
     let mut loaded = LoadedBpf::load(object)?;
     loaded.stage_rules(&plan)?;
@@ -79,11 +87,37 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
     Command::new("/bin/true")
         .status()
         .context("无法触发 execve smoke 事件")?;
-    let deadline = Instant::now() + Duration::from_secs(3);
+    Command::new("/bin/true")
+        .args((0..32).map(|index| format!("arg-{index}")))
+        .status()
+        .context("无法触发 32 参数 execve")?;
+    Command::new("/bin/true")
+        .arg("x".repeat(300))
+        .status()
+        .context("无法触发长参数 execve")?;
+    let _ = Command::new("/definitely/missing/auditd-ebpf-smoke").status();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
     let mut saw_syscall = false;
     let mut saw_attempt = false;
     let mut saw_result = false;
-    while Instant::now() < deadline && !(saw_syscall && saw_attempt && saw_result) {
+    let mut saw_failed_result = false;
+    let mut saw_argc_truncation = false;
+    let mut saw_argument_truncation = false;
+    let mut saw_fork = false;
+    let mut saw_process_exec = false;
+    let mut saw_exit = false;
+    while Instant::now() < deadline
+        && !(saw_syscall
+            && saw_attempt
+            && saw_result
+            && saw_failed_result
+            && saw_argc_truncation
+            && saw_argument_truncation
+            && saw_fork
+            && saw_process_exec
+            && saw_exit)
+    {
         while let Some(item) = ring.next() {
             match decode_owned(&item)? {
                 KernelRecord::Syscall(event)
@@ -97,19 +131,48 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
                     if event.header.rule_version == expected_version && event.argc_captured > 0 =>
                 {
                     saw_attempt = true;
+                    saw_argc_truncation |= event.argv_flags & EXEC_ARGV_FLAG_ARGC_TRUNCATED != 0
+                        && event.argc_captured == 32;
+                    saw_argument_truncation |=
+                        event.argv_flags & EXEC_ARGV_FLAG_ARGUMENT_TRUNCATED != 0;
                 }
                 KernelRecord::ExecResult(event)
                     if event.header.rule_version == expected_version && event.result >= 0 =>
                 {
                     saw_result = true;
                 }
+                KernelRecord::ExecResult(event)
+                    if event.header.rule_version == expected_version && event.result < 0 =>
+                {
+                    saw_failed_result = true;
+                }
+                KernelRecord::Process(event) if event.event_kind == PROCESS_EVENT_FORK => {
+                    saw_fork = true;
+                }
+                KernelRecord::Process(event) if event.event_kind == PROCESS_EVENT_EXEC => {
+                    saw_process_exec = true;
+                }
+                KernelRecord::Process(event) if event.event_kind == PROCESS_EVENT_EXIT => {
+                    saw_exit = true;
+                }
                 _ => {}
             }
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    if !(saw_syscall && saw_attempt && saw_result) {
-        bail!("内核采集不完整 syscall={saw_syscall} attempt={saw_attempt} result={saw_result}");
+    if !(saw_syscall
+        && saw_attempt
+        && saw_result
+        && saw_failed_result
+        && saw_argc_truncation
+        && saw_argument_truncation
+        && saw_fork
+        && saw_process_exec
+        && saw_exit)
+    {
+        bail!(
+            "内核采集不完整 syscall={saw_syscall} attempt={saw_attempt} result={saw_result} failed={saw_failed_result} argc_truncated={saw_argc_truncation} arg_truncated={saw_argument_truncation} fork={saw_fork} process_exec={saw_process_exec} exit={saw_exit}"
+        );
     }
     println!(
         "内核采集 PASS kernel={} rule_version={expected_version}",

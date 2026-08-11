@@ -84,8 +84,8 @@ syscall、exec、绝对/相对/dirfd、mount namespace 和 chroot 路径操作�
 - [X] T031 [P] [US1] 为每条 syscall/watch 规则恰好一个非空 key、规范化、first-match、perm 展开、规则 hash、argv 按 key 覆盖、仅覆盖 key 跨规则唯一约束和双 generation 编译添加失败测试于 `crates/auditd-ebpf-rules/tests/compile_rules.rs`、`crates/auditd-ebpf-rules/tests/argv_policy.rs`
 - [X] T032 [P] [US1] 为 B64/B32 syscall 名称、数字和未知进程 ABI 候选行为添加失败测试于 `crates/auditd-ebpf-rules/tests/syscall_tables.rs`
 - [X] T033 [P] [US1] 为 syscall、ExecAttempt、ExecResult、fork/exit 和每 CPU 丢失记录添加 ABI 契约测试于 `crates/auditd-ebpf-common/tests/kernel_records.rs`
-- [ ] T034 [P] [US1] 为 raw sys_enter/sys_exit 加载、粗筛选、返回值和 rule_version 添加特权失败测试于 `tests/privileged/syscall_capture.sh`
-- [ ] T035 [P] [US1] 为 exec 成功/失败、32 参数、参数截断、全局/规则级抑制时仍提交 argv、attempt/result 缺失和进程缓存不保留 argv 添加特权失败测试于 `tests/privileged/exec_capture.sh`
+- [X] T034 [P] [US1] 为 raw sys_enter/sys_exit 加载、粗筛选、返回值和 rule_version 添加特权失败测试于 `tests/privileged/syscall_capture.sh`
+- [X] T035 [P] [US1] 为 exec 成功/失败、32 参数、参数截断、全局/规则级抑制时仍提交 argv、attempt/result 缺失和进程缓存不保留 argv 添加特权失败测试于 `tests/privileged/exec_capture.sh`
 - [ ] T036 [P] [US1] 为 fork、clone、exec、exit、PID/TID 复用、B64/B32 继承和线程路径上下文隔离添加特权失败测试于 `tests/privileged/process_lifecycle.sh`
 - [X] T037 [P] [US1] 为 `/proc/<tid>/root`、`ns/mnt`、`mountinfo` bootstrap、cwd、dirfd、open/dup/close、全局 mount epoch 和路径置信度添加失败单元测试于 `crates/auditd-ebpf/tests/process_cache.rs`、`crates/auditd-ebpf/tests/path_resolution.rs`
 - [ ] T038 [P] [US1] 为绝对/cwd/dirfd 路径、rename/unlink、独立 mount namespace、bind/remount、chroot/pivot_root/setns/unshare 失效和无法解析 gap 添加特权失败测试于 `tests/privileged/path_rules.sh`、`tests/privileged/path_namespace.sh`
