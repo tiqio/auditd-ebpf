@@ -1,0 +1,3 @@
+-a always,exit -S execve
+-a always,exit -S openat -F auid=1000 -k unsupported
+

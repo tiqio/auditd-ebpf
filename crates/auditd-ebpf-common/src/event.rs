@@ -42,3 +42,37 @@ pub struct SyscallEvent {
     pub dirfd: i32,
     pub path_flags: u32,
 }
+
+pub const MAX_EXEC_ARGS: usize = 32;
+pub const MAX_EXEC_ARG_BYTES: usize = 192;
+pub const MAX_EXEC_BYTES: usize = MAX_EXEC_ARGS * MAX_EXEC_ARG_BYTES;
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct ExecAttempt {
+    pub header: KernelEventHeader,
+    pub attempt_id: u64,
+    pub argc_observed: u32,
+    pub argc_captured: u16,
+    pub argv_flags: u16,
+    pub argv_offsets: [u16; MAX_EXEC_ARGS + 1],
+    pub argv_bytes: [u8; MAX_EXEC_BYTES],
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct ExecResult {
+    pub header: KernelEventHeader,
+    pub attempt_id: u64,
+    pub result: i64,
+    pub new_comm: [u8; 16],
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct ProcessEvent {
+    pub header: KernelEventHeader,
+    pub parent_pid_tgid: u64,
+    pub event_kind: u32,
+    pub abi_arch: u32,
+}

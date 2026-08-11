@@ -78,29 +78,29 @@ syscall、exec、绝对/相对/dirfd、mount namespace 和 chroot 路径操作�
 
 ### Tests First
 
-- [ ] T028 [P] [US1] 为注释、空行、syscall form、legacy watch、CRLF 和多 `-S` 添加失败词法/语法测试于 `crates/auditd-ebpf-rules/tests/parser_supported.rs`
-- [ ] T029 [P] [US1] 为不支持选项、字段、action、list、路径、空 key、缺失 key、重复 `-k`/`-F key=`、混用两种 key 和冲突条件添加失败诊断 golden test 于 `crates/auditd-ebpf-rules/tests/parser_rejected.rs`、`tests/golden/rule-errors/`
-- [ ] T030 [P] [US1] 为文件排序、root 所有权、group/other 可写和 fallback 文件添加失败 RuleSource 测试于 `crates/auditd-ebpf-rules/tests/rule_sources.rs`
-- [ ] T031 [P] [US1] 为每条 syscall/watch 规则恰好一个非空 key、规范化、first-match、perm 展开、规则 hash、argv 按 key 覆盖、仅覆盖 key 跨规则唯一约束和双 generation 编译添加失败测试于 `crates/auditd-ebpf-rules/tests/compile_rules.rs`、`crates/auditd-ebpf-rules/tests/argv_policy.rs`
-- [ ] T032 [P] [US1] 为 B64/B32 syscall 名称、数字和未知进程 ABI 候选行为添加失败测试于 `crates/auditd-ebpf-rules/tests/syscall_tables.rs`
-- [ ] T033 [P] [US1] 为 syscall、ExecAttempt、ExecResult、fork/exit 和每 CPU 丢失记录添加 ABI 契约测试于 `crates/auditd-ebpf-common/tests/kernel_records.rs`
+- [X] T028 [P] [US1] 为注释、空行、syscall form、legacy watch、CRLF 和多 `-S` 添加失败词法/语法测试于 `crates/auditd-ebpf-rules/tests/parser_supported.rs`
+- [X] T029 [P] [US1] 为不支持选项、字段、action、list、路径、空 key、缺失 key、重复 `-k`/`-F key=`、混用两种 key 和冲突条件添加失败诊断 golden test 于 `crates/auditd-ebpf-rules/tests/parser_rejected.rs`、`tests/golden/rule-errors/`
+- [X] T030 [P] [US1] 为文件排序、root 所有权、group/other 可写和 fallback 文件添加失败 RuleSource 测试于 `crates/auditd-ebpf-rules/tests/rule_sources.rs`
+- [X] T031 [P] [US1] 为每条 syscall/watch 规则恰好一个非空 key、规范化、first-match、perm 展开、规则 hash、argv 按 key 覆盖、仅覆盖 key 跨规则唯一约束和双 generation 编译添加失败测试于 `crates/auditd-ebpf-rules/tests/compile_rules.rs`、`crates/auditd-ebpf-rules/tests/argv_policy.rs`
+- [X] T032 [P] [US1] 为 B64/B32 syscall 名称、数字和未知进程 ABI 候选行为添加失败测试于 `crates/auditd-ebpf-rules/tests/syscall_tables.rs`
+- [X] T033 [P] [US1] 为 syscall、ExecAttempt、ExecResult、fork/exit 和每 CPU 丢失记录添加 ABI 契约测试于 `crates/auditd-ebpf-common/tests/kernel_records.rs`
 - [ ] T034 [P] [US1] 为 raw sys_enter/sys_exit 加载、粗筛选、返回值和 rule_version 添加特权失败测试于 `tests/privileged/syscall_capture.sh`
 - [ ] T035 [P] [US1] 为 exec 成功/失败、32 参数、参数截断、全局/规则级抑制时仍提交 argv、attempt/result 缺失和进程缓存不保留 argv 添加特权失败测试于 `tests/privileged/exec_capture.sh`
 - [ ] T036 [P] [US1] 为 fork、clone、exec、exit、PID/TID 复用、B64/B32 继承和线程路径上下文隔离添加特权失败测试于 `tests/privileged/process_lifecycle.sh`
-- [ ] T037 [P] [US1] 为 `/proc/<tid>/root`、`ns/mnt`、`mountinfo` bootstrap、cwd、dirfd、open/dup/close、全局 mount epoch 和路径置信度添加失败单元测试于 `crates/auditd-ebpf/tests/process_cache.rs`、`crates/auditd-ebpf/tests/path_resolution.rs`
+- [X] T037 [P] [US1] 为 `/proc/<tid>/root`、`ns/mnt`、`mountinfo` bootstrap、cwd、dirfd、open/dup/close、全局 mount epoch 和路径置信度添加失败单元测试于 `crates/auditd-ebpf/tests/process_cache.rs`、`crates/auditd-ebpf/tests/path_resolution.rs`
 - [ ] T038 [P] [US1] 为绝对/cwd/dirfd 路径、rename/unlink、独立 mount namespace、bind/remount、chroot/pivot_root/setns/unshare 失效和无法解析 gap 添加特权失败测试于 `tests/privileged/path_rules.sh`、`tests/privileged/path_namespace.sh`
 - [ ] T039 [P] [US1] 为 SIGHUP 原子切换、并发事件版本和无效候选保留旧规则添加特权失败测试于 `tests/privileged/rule_reload.sh`
 - [ ] T040 [P] [US1] 为完整兼容 corpus、逐行拒绝和 `check-rules --print-normalized` 添加端到端失败测试于 `tests/integration/rule_compatibility.rs`、`tests/fixtures/rules/`
 
 ### Implementation
 
-- [ ] T041 [P] [US1] 实现带文件/行/列 span 的规则 lexer 和控制字符拒绝于 `crates/auditd-ebpf-rules/src/lexer.rs`
-- [ ] T042 [US1] 按 EBNF 实现 syscall/watch parser、字段操作符和每条规则恰好一个非空 key 的缺失/重复拒绝于 `crates/auditd-ebpf-rules/src/parser.rs`
-- [ ] T043 [P] [US1] 实现稳定错误码、中文诊断和原始规则安全摘要于 `crates/auditd-ebpf-rules/src/diagnostic.rs`
-- [ ] T044 [US1] 实现 `RuleSource`、必填单 key `AuditRule`、`RuleSet`、`argv_output=Inherit/Enabled/Disabled`、覆盖 key 跨规则唯一诊断、验证状态与 SHA-256 版本于 `crates/auditd-ebpf-rules/src/model.rs`、`crates/auditd-ebpf-rules/src/normalize.rs`
-- [ ] T045 [P] [US1] 实现 x86_64 B64/B32 syscall 表、perm 操作分类和版本化兼容矩阵于 `crates/auditd-ebpf-rules/src/syscalls/x86_64.rs`、`crates/auditd-ebpf-rules/src/permissions.rs`、`docs/rule-compatibility.md`
-- [ ] T046 [US1] 实现 `.rules` C-locale 字节排序、root/模式校验和单文件 fallback 于 `crates/auditd-ebpf-rules/src/source.rs`
-- [ ] T047 [US1] 实现粗 syscall/ABI/身份并集、任意 exec 规则即启用 argv 采集、双 generation map 数据和携带按 key argv 输出策略的 first-match 用户态计划于 `crates/auditd-ebpf-rules/src/compiler.rs`
+- [X] T041 [P] [US1] 实现带文件/行/列 span 的规则 lexer 和控制字符拒绝于 `crates/auditd-ebpf-rules/src/lexer.rs`
+- [X] T042 [US1] 按 EBNF 实现 syscall/watch parser、字段操作符和每条规则恰好一个非空 key 的缺失/重复拒绝于 `crates/auditd-ebpf-rules/src/parser.rs`
+- [X] T043 [P] [US1] 实现稳定错误码、中文诊断和原始规则安全摘要于 `crates/auditd-ebpf-rules/src/diagnostic.rs`
+- [X] T044 [US1] 实现 `RuleSource`、必填单 key `AuditRule`、`RuleSet`、`argv_output=Inherit/Enabled/Disabled`、覆盖 key 跨规则唯一诊断、验证状态与 SHA-256 版本于 `crates/auditd-ebpf-rules/src/model.rs`、`crates/auditd-ebpf-rules/src/normalize.rs`
+- [X] T045 [P] [US1] 实现 x86_64 B64/B32 syscall 表、perm 操作分类和版本化兼容矩阵于 `crates/auditd-ebpf-rules/src/syscalls/x86_64.rs`、`crates/auditd-ebpf-rules/src/permissions.rs`、`docs/rule-compatibility.md`
+- [X] T046 [US1] 实现 `.rules` C-locale 字节排序、root/模式校验和单文件 fallback 于 `crates/auditd-ebpf-rules/src/source.rs`
+- [X] T047 [US1] 实现粗 syscall/ABI/身份并集、任意 exec 规则即启用 argv 采集、双 generation map 数据和携带按 key argv 输出策略的 first-match 用户态计划于 `crates/auditd-ebpf-rules/src/compiler.rs`
 - [ ] T048 [US1] 实现 generation maps、syscall bitmap、进程 ABI 提示、inflight 上限和每 CPU 计数器于 `crates/auditd-ebpf-ebpf/src/maps.rs`
 - [ ] T049 [US1] 实现 raw sys_enter/sys_exit 粗筛选、参数/返回值/路径参数采集、mount/umount2/move_mount/mount_setattr/chroot/pivot_root/setns/unshare 成功结果标记和 RingBuf 提交于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`
 - [ ] T050 [US1] 实现不受输出抑制策略影响、最多 32×192 字节 argv 的 ExecAttempt、成功/失败 ExecResult、`exec_argv_captured_total` 和中文 verifier 安全注释于 `crates/auditd-ebpf-ebpf/src/programs/exec.rs`、`crates/auditd-ebpf-ebpf/src/maps.rs`
@@ -109,8 +109,8 @@ syscall、exec、绝对/相对/dirfd、mount namespace 和 chroot 路径操作�
 - [ ] T053 [US1] 实现 `/proc/*/task/*` bootstrap、PID/TID 启动身份、线程 root、mount namespace `(st_dev,st_ino)`、mountinfo、ELF class、fork/exec/exit 状态更新且禁止把 argv 写入进程缓存于 `crates/auditd-ebpf/src/process_cache/bootstrap.rs`、`crates/auditd-ebpf/src/process_cache/lifecycle.rs`
 - [ ] T054 [US1] 实现线程 cwd/fd 缓存、open/dup/close/chdir/fchdir 更新、mount/root/namespace 成功变化触发全局 epoch 递增与保守失效、namespace 内词法路径规范化和 gap 生成于 `crates/auditd-ebpf/src/process_cache/fd_table.rs`、`crates/auditd-ebpf/src/process_cache/path.rs`、`crates/auditd-ebpf/src/process_cache/mounts.rs`
 - [ ] T055 [US1] 实现 arch/uid/gid/success/path/dir/perm 精确求值、process root+mount namespace 路径字符串语义、first-match、全局/唯一 key argv 输出决策和 `ResolvedAuditEvent.argv_output`，并明确不声明 symlink/inode/hard-link 等价于 `crates/auditd-ebpf/src/rules/engine.rs`、`crates/auditd-ebpf/src/rules/argv_policy.rs`、`crates/auditd-ebpf/src/rules/mod.rs`
-- [ ] T056 [US1] 实现 inactive generation staging、原子切换、失败回滚和 SIGHUP reload service 于 `crates/auditd-ebpf/src/reload.rs`
-- [ ] T057 [US1] 完成 `check-rules`、规范化输出、rule_version 状态和兼容矩阵生成于 `crates/auditd-ebpf/src/commands/check_rules.rs`、`crates/auditd-ebpf/src/commands/mod.rs`、`docs/rule-compatibility.md`
+- [X] T056 [US1] 实现 inactive generation staging、原子切换、失败回滚和 SIGHUP reload service 于 `crates/auditd-ebpf/src/reload.rs`
+- [X] T057 [US1] 完成 `check-rules`、规范化输出、rule_version 状态和兼容矩阵生成于 `crates/auditd-ebpf/src/commands/check_rules.rs`、`crates/auditd-ebpf/src/commands/mod.rs`、`docs/rule-compatibility.md`
 - [ ] T058 [US1] 运行 parser/单 key/ABI/5.15+ 特权采集/mount namespace/chroot/路径 gap/reload 及 US1 quickstart 验证，并创建采集 MVP 里程碑 commit，涉及 `crates/auditd-ebpf-rules/`、`crates/auditd-ebpf-ebpf/`、`crates/auditd-ebpf/src/collector/`、`crates/auditd-ebpf/src/process_cache/`
 
 **Checkpoint**: US1 可通过内存 sink 独立证明规则兼容、采集正确性、路径缺口可见和原子重载。

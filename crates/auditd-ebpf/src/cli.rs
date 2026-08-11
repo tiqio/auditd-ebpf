@@ -18,8 +18,12 @@ pub enum Command {
         lifecycle_state_file: PathBuf,
     },
     CheckRules {
-        #[arg(long)]
+        #[arg(long, conflicts_with = "rules_dir")]
         rules_file: Option<PathBuf>,
+        #[arg(long, conflicts_with = "rules_file")]
+        rules_dir: Option<PathBuf>,
+        #[arg(long)]
+        print_normalized: bool,
     },
     CheckProduction {
         #[arg(long)]

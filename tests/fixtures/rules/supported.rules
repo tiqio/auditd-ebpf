@@ -1,0 +1,4 @@
+# exec 与 path 规则
+-a always,exit -F arch=b64 -S execve,execveat -k exec-test
+-w /tmp/auditd-ebpf-validation -p wa -k path-test
+

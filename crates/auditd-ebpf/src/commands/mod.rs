@@ -5,6 +5,8 @@ use crate::{
     cli::{Cli, Command},
 };
 
+mod check_rules;
+
 pub fn execute() -> i32 {
     let cli = Cli::parse();
     match cli.command.unwrap_or(Command::Run {
@@ -22,10 +24,21 @@ pub fn execute() -> i32 {
             );
             0
         }
-        Command::CheckRules { rules_file } => {
-            println!("check-rules file={:?}", rules_file);
-            0
-        }
+        Command::CheckRules {
+            rules_file,
+            rules_dir,
+            print_normalized,
+        } => match check_rules::run(
+            rules_file.as_deref(),
+            rules_dir.as_deref(),
+            print_normalized,
+        ) {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("type=AUDITD_EBPF_DIAG level=error code=rule_invalid message={error:?}");
+                3
+            }
+        },
         Command::CheckProduction {
             risk_acceptance_file,
         } => {

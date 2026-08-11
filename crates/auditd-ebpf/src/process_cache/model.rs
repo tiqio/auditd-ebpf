@@ -22,3 +22,10 @@ pub struct ThreadPathContext {
     pub cwd: Option<PathBuf>,
     pub fd_table: BTreeMap<i32, PathBuf>,
 }
+
+impl ThreadPathContext {
+    #[must_use]
+    pub const fn is_current(&self, current_epoch: u64) -> bool {
+        self.mount_epoch == current_epoch
+    }
+}
