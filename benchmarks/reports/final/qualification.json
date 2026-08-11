@@ -1,0 +1,18 @@
+{
+  "qualified": false,
+  "input": {
+    "operator_attested_isolation": false,
+    "cpu_count": 16,
+    "load_one": 2.29,
+    "governors": [],
+    "interfering_services": [
+      "unattended-upgrades.service"
+    ],
+    "virtualization": "vmware"
+  },
+  "issues": [
+    "缺少 AUDITD_EBPF_BENCH_ISOLATED=1 运维隔离声明",
+    "无法读取 CPU governor，环境证据不完整",
+    "存在干扰服务: unattended-upgrades.service"
+  ]
+}

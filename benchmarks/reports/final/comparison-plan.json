@@ -1,0 +1,73 @@
+{
+  "duration_seconds": 120,
+  "modes": [
+    "capture-only",
+    "operational"
+  ],
+  "performance_claim_allowed": false,
+  "protocol_version": 1,
+  "qualification_issues": [
+    "缺少 AUDITD_EBPF_BENCH_ISOLATED=1 运维隔离声明",
+    "无法读取 CPU governor，环境证据不完整",
+    "存在干扰服务: unattended-upgrades.service"
+  ],
+  "runs": [
+    {
+      "attempt": 1,
+      "implementation": "auditd-ebpf",
+      "sequence": 0
+    },
+    {
+      "attempt": 1,
+      "implementation": "auditd",
+      "sequence": 1
+    },
+    {
+      "attempt": 2,
+      "implementation": "auditd",
+      "sequence": 2
+    },
+    {
+      "attempt": 2,
+      "implementation": "auditd-ebpf",
+      "sequence": 3
+    },
+    {
+      "attempt": 3,
+      "implementation": "auditd-ebpf",
+      "sequence": 4
+    },
+    {
+      "attempt": 4,
+      "implementation": "auditd-ebpf",
+      "sequence": 5
+    },
+    {
+      "attempt": 3,
+      "implementation": "auditd",
+      "sequence": 6
+    },
+    {
+      "attempt": 5,
+      "implementation": "auditd-ebpf",
+      "sequence": 7
+    },
+    {
+      "attempt": 4,
+      "implementation": "auditd",
+      "sequence": 8
+    },
+    {
+      "attempt": 5,
+      "implementation": "auditd",
+      "sequence": 9
+    }
+  ],
+  "scenarios": [
+    "syscall",
+    "path",
+    "mixed"
+  ],
+  "status": "blocked",
+  "warmup_seconds": 30
+}
