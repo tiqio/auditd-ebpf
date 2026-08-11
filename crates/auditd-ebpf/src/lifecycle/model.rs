@@ -10,6 +10,7 @@ pub enum LifecycleState {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LifecycleMarker {
     pub version: u16,
     pub state: LifecycleState,
@@ -18,6 +19,7 @@ pub struct LifecycleMarker {
     pub pid: u32,
     pub process_start_time: u64,
     pub rule_version: Option<u64>,
+    pub updated_at: String,
     pub final_counters: Option<BTreeMap<String, u64>>,
 }
 
@@ -36,12 +38,14 @@ impl LifecycleMarker {
             pid,
             process_start_time,
             rule_version: None,
+            updated_at: crate::lifecycle::state_file::rfc3339_now(),
             final_counters: None,
         }
     }
     #[must_use]
     pub fn into_clean(mut self, counters: BTreeMap<String, u64>) -> Self {
         self.state = LifecycleState::Clean;
+        self.updated_at = crate::lifecycle::state_file::rfc3339_now();
         self.final_counters = Some(counters);
         self
     }

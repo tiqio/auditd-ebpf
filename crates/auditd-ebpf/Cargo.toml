@@ -20,6 +20,10 @@ path = "../../tests/integration/rule_compatibility.rs"
 name = "output_streams"
 path = "../../tests/integration/output_streams.rs"
 
+[[test]]
+name = "signals"
+path = "../../tests/integration/signals.rs"
+
 [dependencies]
 anyhow.workspace = true
 auditd-ebpf-common = { path = "../auditd-ebpf-common", features = ["user"] }
@@ -29,6 +33,7 @@ aya-log.workspace = true
 clap.workspace = true
 hex.workspace = true
 hmac.workspace = true
+libc.workspace = true
 serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true

@@ -16,14 +16,7 @@ pub fn execute() -> i32 {
         Command::Run {
             node_name,
             lifecycle_state_file,
-        } => {
-            println!(
-                "type=AUDITD_EBPF_STATUS state=starting node_name={:?} lifecycle={}",
-                node_name,
-                lifecycle_state_file.display()
-            );
-            0
-        }
+        } => crate::runtime::run(node_name.as_deref(), &lifecycle_state_file),
         Command::CheckRules {
             rules_file,
             rules_dir,

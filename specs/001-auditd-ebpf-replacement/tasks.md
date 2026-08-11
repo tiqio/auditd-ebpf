@@ -137,7 +137,7 @@ rsyslog 逐字节保留策略后源记录，suppressed 事件显示 `argv_output
 - [X] T061 [P] [US2] 为 emitted argv 原样输出、suppressed argv 不进入 stdout/stderr/gap/status/输出队列、审计 stdout、诊断/status stderr 和永久 EPIPE 退出码添加进程集成测试于 `tests/integration/output_streams.rs`、`crates/auditd-ebpf/tests/argv_suppression.rs`
 - [X] T062 [P] [US2] 为 64 MiB 起始、80% 高水位、512 MiB 硬上限、缩容和 drop-new 添加失败测试于 `crates/auditd-ebpf/tests/adaptive_queue.rs`
 - [X] T063 [P] [US2] 为计数不变量、`exec_argv_suppressed_total <= exec_argv_captured_total`、`unclean_shutdown_detected_total`、degraded 恢复窗口、生产策略状态、unhealthy 和 final 状态添加失败测试于 `crates/auditd-ebpf/tests/health_contract.rs`
-- [ ] T064 [P] [US2] 为 SIGUSR1、SIGTERM 排空、超时退出码 8、信号重入、优雅 clean、SIGKILL 保留 dirty 和重启 10 秒内 unknown-count gap 添加集成测试于 `tests/integration/signals.rs`、`tests/privileged/lifecycle_restart.sh`
+- [X] T064 [P] [US2] 为 SIGUSR1、SIGTERM 排空、超时退出码 8、信号重入、优雅 clean、SIGKILL 保留 dirty 和重启 10 秒内 unknown-count gap 添加集成测试于 `tests/integration/signals.rs`、`tests/privileged/lifecycle_restart.sh`
 - [ ] T065 [P] [US2] 为 root 可信风险 TOML、生命周期 TOML `0600`/普通文件/可信父目录、未知版本/键、缺字段、符号链接/TOCTOU、策略摘要稳定性/不匹配、无时间到期、journal 获准组和 systemd capability 边界添加特权测试于 `tests/privileged/production_policy.sh`、`tests/privileged/lifecycle_state.sh`、`tests/privileged/systemd_journal.sh`
 - [ ] T066 [P] [US2] 为 rsyslog imjournal 游标、策略后 stdout 行逐字节一致、suppressed 无 `aN`、事件/状态分流、本地 `0640`/导出 `0600`、认证 TLS 服务端身份、逐目的地保留、断网队列和恢复添加特权测试于 `tests/privileged/rsyslog_pipeline.sh`、`tests/fixtures/rsyslog/`
 

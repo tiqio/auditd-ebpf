@@ -76,6 +76,7 @@ dependencies = [
  "clap",
  "hex",
  "hmac",
+ "libc",
  "serde",
  "sha2",
  "thiserror",
