@@ -152,8 +152,8 @@ rsyslog 逐字节保留策略后源记录，suppressed 事件显示 `argv_output
 - [X] T073 [P] [US2] 编写最小 capability、只读文件系统、风险记录只读路径、仅 `/var/lib/auditd-ebpf` 生命周期目录可写、journal 输出、获准审计组和 reload 的 hardened unit 于 `packaging/systemd/auditd-ebpf.service`
 - [X] T074 [P] [US2] 编写 imjournal 持久游标、策略后源记录逐字节保留、事件/运维分流、本地 `0640`、认证 TLS `x509/name`、磁盘辅助队列、保留和限速配置于 `packaging/rsyslog/60-auditd-ebpf.conf`
 - [X] T075 [P] [US2] 编写中文配置参考、稳定 host/machine_id、argv 默认原样与用户态抑制、唯一 key 覆盖、clean/dirty 风险边界、风险 TOML 审批/无固定到期/策略摘要、systemd/journal 权限、rsyslog 原样记录/认证加密和保留期于 `docs/configuration.md`、`docs/operations.md`
-- [ ] T076 [US2] 按 quickstart 执行 host/machine_id 稳定性、emitted/suppressed argv、`print-policy-digest`、production policy、journalctl/rsyslog 10 秒检索与逐字节比较、backpressure、reload、SIGKILL dirty 重启 gap 和优雅 clean 端到端测试于 `tests/integration/logging_end_to_end.sh`、`crates/xtask/src/commands/test_kernel.rs`
-- [ ] T077 [US2] 运行身份/格式/属性/argv 泄露负例/生命周期/风险摘要/信号/systemd/rsyslog/背压和 US2 quickstart 门禁，并创建日志集成里程碑 commit，涉及 `crates/auditd-ebpf/src/identity.rs`、`crates/auditd-ebpf/src/lifecycle/`、`crates/auditd-ebpf/src/output/`、`crates/auditd-ebpf/src/policy/`、`crates/auditd-ebpf/src/health/`、`packaging/`
+- [X] T076 [US2] 按 quickstart 执行 host/machine_id 稳定性、emitted/suppressed argv、`print-policy-digest`、production policy、journalctl/rsyslog 10 秒检索与逐字节比较、backpressure、reload、SIGKILL dirty 重启 gap 和优雅 clean 端到端测试于 `tests/integration/logging_end_to_end.sh`、`crates/xtask/src/commands/test_kernel.rs`
+- [X] T077 [US2] 运行身份/格式/属性/argv 泄露负例/生命周期/风险摘要/信号/systemd/rsyslog/背压和 US2 quickstart 门禁，并创建日志集成里程碑 commit，涉及 `crates/auditd-ebpf/src/identity.rs`、`crates/auditd-ebpf/src/lifecycle/`、`crates/auditd-ebpf/src/output/`、`crates/auditd-ebpf/src/policy/`、`crates/auditd-ebpf/src/health/`、`packaging/`
 
 **Checkpoint**: US2 可独立证明 emitted argv 原样进入受控日志、suppressed argv 仍被内核采集但
 不泄露到任何日志，并以匹配当前策略摘要的风险记录和实际访问/TLS/保留检查通过生产门禁。

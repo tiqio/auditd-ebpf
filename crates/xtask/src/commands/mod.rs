@@ -69,6 +69,7 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         );
     }
     build_ebpf(true)?;
+    cargo_build(false)?;
     let object = Path::new("target/bpfel-unknown-none/release/auditd-ebpf-ebpf");
     let rules = parse_rules(
         "kernel-smoke.rules",
@@ -256,6 +257,13 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         "内核采集 PASS kernel={} rule_version={expected_version} reloaded_version={reloaded_version}",
         release.trim(),
     );
+    run(
+        Command::new("tests/integration/logging_end_to_end.sh").args([
+            "target/debug/auditd-ebpf",
+            object.to_str().context("eBPF 对象路径不是 UTF-8")?,
+        ]),
+    )
+    .context("US2 日志 quickstart 门禁失败")?;
     Ok(())
 }
 
