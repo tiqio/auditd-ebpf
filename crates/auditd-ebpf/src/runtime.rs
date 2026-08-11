@@ -3,6 +3,10 @@ use std::{
     fs,
     io::{self, Write},
     path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -15,6 +19,7 @@ use crate::{
         model::{LifecycleMarker, LifecycleState},
         state_file::LifecycleStateFile,
     },
+    loader::LoadedBpf,
     output::status_formatter::{status, unclean_shutdown_gap},
 };
 
@@ -91,7 +96,7 @@ pub fn drain_with_timeout(timeout: Duration, mut is_empty: impl FnMut() -> bool)
     }
 }
 
-pub fn run(node_name: Option<&str>, lifecycle_path: &Path) -> i32 {
+pub fn run(node_name: Option<&str>, lifecycle_path: &Path, ebpf_object: Option<&Path>) -> i32 {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -102,10 +107,44 @@ pub fn run(node_name: Option<&str>, lifecycle_path: &Path) -> i32 {
             return 7;
         }
     };
-    runtime.block_on(run_async(node_name, lifecycle_path))
+    runtime.block_on(run_async(node_name, lifecycle_path, ebpf_object))
 }
 
-async fn run_async(node_name: Option<&str>, lifecycle_path: &Path) -> i32 {
+async fn run_async(
+    node_name: Option<&str>,
+    lifecycle_path: &Path,
+    ebpf_object: Option<&Path>,
+) -> i32 {
+    // 信号 fd 必须在任何可能耗时的 load/attach 前注册。否则 dirty 已持久化但 attach 尚未完成
+    // 的窗口里，SIGTERM 会执行默认动作，绕过排空与最终状态逻辑。
+    let mut usr1 = match signal(SignalKind::user_defined1()) {
+        Ok(signal) => signal,
+        Err(_) => return 7,
+    };
+    let mut term = match signal(SignalKind::terminate()) {
+        Ok(signal) => signal,
+        Err(_) => return 7,
+    };
+    let mut interrupt = match signal(SignalKind::interrupt()) {
+        Ok(signal) => signal,
+        Err(_) => return 7,
+    };
+    let mut hangup = match signal(SignalKind::hangup()) {
+        Ok(signal) => signal,
+        Err(_) => return 7,
+    };
+
+    // eBPF 对象可以先完成读取与 Aya 解析，但在 durable dirty 成功前绝不 attach，也不启动
+    // RingBuf 消费。这样加载失败不会制造虚假的 dirty，而 attach 后异常一定留下 dirty 证据。
+    let mut loaded_bpf = match ebpf_object.map(LoadedBpf::load).transpose() {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            eprintln!(
+                "type=AUDITD_EBPF_DIAG level=error code=ebpf_load component=runtime message={error:?}"
+            );
+            return 6;
+        }
+    };
     let state_file = LifecycleStateFile::new(lifecycle_path);
     let previous = match state_file.read() {
         Ok(marker) => marker,
@@ -128,6 +167,26 @@ async fn run_async(node_name: Option<&str>, lifecycle_path: &Path) -> i32 {
         return 4;
     }
 
+    let mut collector = if let Some(loaded) = loaded_bpf.as_mut() {
+        if let Err(error) = loaded.attach_collection_programs() {
+            eprintln!(
+                "type=AUDITD_EBPF_DIAG level=error code=ebpf_attach component=runtime message={error:?}"
+            );
+            return 6;
+        }
+        match loaded.take_ring() {
+            Ok(ring) => Some(KernelCollector::start(ring)),
+            Err(error) => {
+                eprintln!(
+                    "type=AUDITD_EBPF_DIAG level=error code=ringbuf_open component=runtime message={error:?}"
+                );
+                return 6;
+            }
+        }
+    } else {
+        None
+    };
+
     let identity = resolve_identity(node_name);
     if previous_dirty {
         let line = unclean_shutdown_gap(
@@ -148,23 +207,6 @@ async fn run_async(node_name: Option<&str>, lifecycle_path: &Path) -> i32 {
         eprint!("{}", status(&identity, "healthy", 0, 0, false));
     }
 
-    let mut usr1 = match signal(SignalKind::user_defined1()) {
-        Ok(signal) => signal,
-        Err(_) => return 7,
-    };
-    let mut term = match signal(SignalKind::terminate()) {
-        Ok(signal) => signal,
-        Err(_) => return 7,
-    };
-    let mut interrupt = match signal(SignalKind::interrupt()) {
-        Ok(signal) => signal,
-        Err(_) => return 7,
-    };
-    let mut hangup = match signal(SignalKind::hangup()) {
-        Ok(signal) => signal,
-        Err(_) => return 7,
-    };
-
     loop {
         tokio::select! {
             _ = usr1.recv() => {
@@ -179,14 +221,22 @@ async fn run_async(node_name: Option<&str>, lifecycle_path: &Path) -> i32 {
     }
 
     eprint!("{}", status(&identity, "stopping", 0, 0, false));
-    let drain = drain_with_timeout(Duration::from_secs(30), || true);
+    let drain = collector
+        .as_mut()
+        .map_or(DrainOutcome::Drained, |collector| {
+            collector.stop(Duration::from_secs(30))
+        });
     eprint!("{}", status(&identity, "stopping", 0, 0, true));
     if io::stderr().flush().is_err() {
         return 7;
     }
+    let consumed = collector.as_ref().map_or(0, KernelCollector::consumed);
+    drop(collector);
+    // LoadedBpf 持有所有 Aya links/maps；先 drop 确保 detach 和 map 清理完成，之后才允许 clean。
+    drop(loaded_bpf);
     let clean = dirty.into_clean(BTreeMap::from([
-        ("events_seen".into(), 0),
-        ("events_submitted".into(), 0),
+        ("events_seen".into(), consumed),
+        ("events_submitted".into(), consumed),
         ("events_output".into(), 0),
         ("ring_lost".into(), 0),
         ("queue_lost".into(), 0),
@@ -197,6 +247,62 @@ async fn run_async(node_name: Option<&str>, lifecycle_path: &Path) -> i32 {
         return 7;
     }
     drain.exit_code()
+}
+
+struct KernelCollector {
+    stop: Arc<AtomicBool>,
+    consumed: Arc<AtomicU64>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl KernelCollector {
+    fn start(mut ring: aya::maps::RingBuf<aya::maps::MapData>) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let consumed = Arc::new(AtomicU64::new(0));
+        let thread_stop = Arc::clone(&stop);
+        let thread_consumed = Arc::clone(&consumed);
+        let thread = thread::spawn(move || {
+            loop {
+                let mut drained = false;
+                while ring.next().is_some() {
+                    drained = true;
+                    thread_consumed.fetch_add(1, Ordering::Relaxed);
+                }
+                if thread_stop.load(Ordering::Acquire) && !drained {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
+        Self {
+            stop,
+            consumed,
+            thread: Some(thread),
+        }
+    }
+
+    fn stop(&mut self, timeout: Duration) -> DrainOutcome {
+        self.stop.store(true, Ordering::Release);
+        let deadline = Instant::now() + timeout;
+        while self
+            .thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
+        {
+            if Instant::now() >= deadline {
+                return DrainOutcome::TimedOut;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        DrainOutcome::Drained
+    }
+
+    fn consumed(&self) -> u64 {
+        self.consumed.load(Ordering::Relaxed)
+    }
 }
 
 fn resolve_identity(node_name: Option<&str>) -> HostIdentity {

@@ -17,17 +17,20 @@ pub fn execute() -> i32 {
         lifecycle_state_file: "/var/lib/auditd-ebpf/lifecycle.toml".into(),
         deployment_mode: crate::cli::DeploymentMode::NonProduction,
         risk_acceptance_file: None,
+        ebpf_object: None,
     }) {
         Command::Run {
             node_name,
             lifecycle_state_file,
             deployment_mode,
             risk_acceptance_file,
+            ebpf_object,
         } => run::run(
             node_name.as_deref(),
             &lifecycle_state_file,
             deployment_mode,
             risk_acceptance_file.as_deref(),
+            ebpf_object.as_deref(),
         ),
         Command::CheckRules {
             rules_file,

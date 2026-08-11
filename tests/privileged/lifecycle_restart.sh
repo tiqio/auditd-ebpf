@@ -7,6 +7,7 @@ if [[ ${EUID} -ne 0 ]]; then
 fi
 
 binary=${1:?用法: lifecycle_restart.sh /path/to/auditd-ebpf}
+ebpf_object=${2:-}
 workdir=$(mktemp -d /tmp/auditd-ebpf-lifecycle.XXXXXX)
 chmod 0700 "${workdir}"
 state=${workdir}/lifecycle.toml
@@ -15,8 +16,13 @@ first_err=${workdir}/first.err
 second_out=${workdir}/second.out
 second_err=${workdir}/second.err
 trap 'rm -rf "${workdir}"' EXIT
+run_args=(run)
+if [[ -n ${ebpf_object} ]]; then
+  run_args+=(--ebpf-object "${ebpf_object}")
+fi
+run_args+=(--lifecycle-state-file "${state}")
 
-"${binary}" run --lifecycle-state-file "${state}" >"${first_out}" 2>"${first_err}" &
+"${binary}" "${run_args[@]}" >"${first_out}" 2>"${first_err}" &
 first_pid=$!
 for _ in $(seq 1 100); do
   [[ -f ${state} ]] && grep -q 'state = "dirty"' "${state}" && break
@@ -28,7 +34,7 @@ wait "${first_pid}" 2>/dev/null || true
 grep -q 'state = "dirty"' "${state}"
 
 start=$(date +%s)
-"${binary}" run --lifecycle-state-file "${state}" >"${second_out}" 2>"${second_err}" &
+"${binary}" "${run_args[@]}" >"${second_out}" 2>"${second_err}" &
 second_pid=$!
 for _ in $(seq 1 200); do
   grep -q 'reason=unclean_shutdown count=?' "${second_out}" && break
@@ -40,4 +46,3 @@ kill -TERM "${second_pid}"
 wait "${second_pid}"
 grep -q 'state = "clean"' "${state}"
 grep -q 'final=yes' "${second_err}"
-

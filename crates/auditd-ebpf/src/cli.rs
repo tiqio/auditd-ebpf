@@ -26,6 +26,8 @@ pub enum Command {
         deployment_mode: DeploymentMode,
         #[arg(long)]
         risk_acceptance_file: Option<PathBuf>,
+        #[arg(long)]
+        ebpf_object: Option<PathBuf>,
     },
     CheckRules {
         #[arg(long, conflicts_with = "rules_dir")]

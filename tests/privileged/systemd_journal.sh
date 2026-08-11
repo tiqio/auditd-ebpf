@@ -12,5 +12,5 @@ grep -Fxq 'AmbientCapabilities=CAP_BPF CAP_PERFMON' "${unit}"
 grep -Fxq 'ReadWritePaths=/var/lib/auditd-ebpf' "${unit}"
 grep -Fxq 'SupplementaryGroups=auditd-ebpf-auditors' "${unit}"
 grep -Fxq 'ExecReload=/bin/kill -HUP $MAINPID' "${unit}"
+grep -Fq -- '--ebpf-object /usr/lib/auditd-ebpf/auditd-ebpf-ebpf' "${unit}"
 ! grep -Eq '^ReadWritePaths=.*(/etc|/usr|/var/log)' "${unit}"
-
