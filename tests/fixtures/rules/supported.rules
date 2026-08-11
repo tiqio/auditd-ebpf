@@ -1,5 +1,5 @@
 # 完整受支持 corpus：syscall、数字 syscall、身份、结果、path/dir、watch 与两种 key 形式。
 -a always,exit -F arch=b64 -S execve,execveat -F uid=0 -F gid=0 -F success=yes -k exec-root
 -a always,exit -F arch=b64 -S openat -F euid=1000 -F egid=1000 -F path=/tmp/auditd-ebpf-validation/file -F perm=rw -F key=path-exact
--a always,exit -F arch=b32 -S 295 -F dir=/tmp/auditd-ebpf-validation -F perm=wa -k compat-dir
+-a always,exit -F arch=b32 -S 295,306 -F dir=/tmp/auditd-ebpf-validation -F perm=wa -k compat-dir
 -w /tmp/auditd-ebpf-validation -p rwxa -k legacy-watch

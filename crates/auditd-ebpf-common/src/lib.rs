@@ -3,6 +3,7 @@
 
 pub mod counters;
 pub mod event;
+pub mod permission;
 
 /// 共享 ABI 的 schema 主版本。
 pub const SCHEMA_VERSION: u16 = 1;

@@ -115,6 +115,7 @@ dependencies = [
 name = "auditd-ebpf-rules"
 version = "0.1.0"
 dependencies = [
+ "auditd-ebpf-common",
  "hex",
  "sha2",
  "thiserror",

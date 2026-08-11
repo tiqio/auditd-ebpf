@@ -37,20 +37,20 @@
 
 ### Tests First
 
-- [ ] T007 [P] 为 `x=1/w=2/r=4/a=8`、集合求交、未知位拒绝和固定 `rwxa` 文本顺序添加失败测试于 `crates/auditd-ebpf-common/tests/permission_mask.rs`
-- [ ] T008 [P] 为 b64/b32 的 dynamic open、固定 `r/w/x/a` 覆盖、双权限 link 和 coverage version 添加失败测试于 `crates/auditd-ebpf-rules/tests/permission_coverage.rs`
-- [ ] T009 [P] 为 watch 与 syscall `perm=` 展开、空覆盖拒绝、permission table/总 bitmap 不变量和 rule version 变化添加失败测试于 `crates/auditd-ebpf-rules/tests/compile_rules.rs`
-- [ ] T010 [P] 为 path/dir/watch 规则自动加入 close/dup/chdir/mount 边界维护调用且维护调用不属于规则覆盖添加失败测试于 `crates/auditd-ebpf-rules/tests/maintenance_coverage.rs`
+- [X] T007 [P] 为 `x=1/w=2/r=4/a=8`、集合求交、未知位拒绝和固定 `rwxa` 文本顺序添加失败测试于 `crates/auditd-ebpf-common/tests/permission_mask.rs`
+- [X] T008 [P] 为 b64/b32 的 dynamic open、固定 `r/w/x/a` 覆盖、双权限 link 和 coverage version 添加失败测试于 `crates/auditd-ebpf-rules/tests/permission_coverage.rs`
+- [X] T009 [P] 为 watch 与 syscall `perm=` 展开、空覆盖拒绝、permission table/总 bitmap 不变量和 rule version 变化添加失败测试于 `crates/auditd-ebpf-rules/tests/compile_rules.rs`
+- [X] T010 [P] 为 path/dir/watch 规则自动加入 close/dup/chdir/mount 边界维护调用且维护调用不属于规则覆盖添加失败测试于 `crates/auditd-ebpf-rules/tests/maintenance_coverage.rs`
 
 ### Shared Implementation
 
-- [ ] T011 实现 `no_std` 兼容的 `PermissionMask`、有效位检查、求交和稳定格式化接口于 `crates/auditd-ebpf-common/src/permission.rs`、`crates/auditd-ebpf-common/src/lib.rs`
-- [ ] T012 实现 coverage version 1 的 b64/b32 `rwxa` 操作分类、dynamic open 标记和路径来源元数据于 `crates/auditd-ebpf-rules/src/permissions.rs`
-- [ ] T013 扩展并导出 `RulePermissionCoverage`、每 syscall permission table、maintenance bitmap 和 KernelFilterPlan 不变量于 `crates/auditd-ebpf-rules/src/model.rs`、`crates/auditd-ebpf-rules/src/lib.rs`
-- [ ] T014 将 watch 和带 `perm=` syscall 规则编译为非空覆盖、总 bitmap、permission table、maintenance 集合及版本摘要于 `crates/auditd-ebpf-rules/src/compiler.rs`
-- [ ] T015 补齐 coverage version 1 所需 syscall 名称/编号、b64/b32 双向解析和 `<512` 范围验证于 `crates/auditd-ebpf-rules/src/syscalls/x86_64.rs`
-- [ ] T016 运行 `cargo fmt --check`、`cargo clippy -p auditd-ebpf-common -p auditd-ebpf-rules --all-targets -- -D warnings` 和两 crate 全量测试，并记录通过结果于 `docs/watch-foundation-validation.md`
-- [ ] T017 在 T007–T016 全部通过后创建 `feat: compile watch permissions into syscall coverage` 里程碑提交，提交范围为 `crates/auditd-ebpf-common/`、`crates/auditd-ebpf-rules/`、`docs/watch-foundation-validation.md`
+- [X] T011 实现 `no_std` 兼容的 `PermissionMask`、有效位检查、求交和稳定格式化接口于 `crates/auditd-ebpf-common/src/permission.rs`、`crates/auditd-ebpf-common/src/lib.rs`
+- [X] T012 实现 coverage version 1 的 b64/b32 `rwxa` 操作分类、dynamic open 标记和路径来源元数据于 `crates/auditd-ebpf-rules/src/permissions.rs`
+- [X] T013 扩展并导出 `RulePermissionCoverage`、每 syscall permission table、maintenance bitmap 和 KernelFilterPlan 不变量于 `crates/auditd-ebpf-rules/src/model.rs`、`crates/auditd-ebpf-rules/src/lib.rs`
+- [X] T014 将 watch 和带 `perm=` syscall 规则编译为非空覆盖、总 bitmap、permission table、maintenance 集合及版本摘要于 `crates/auditd-ebpf-rules/src/compiler.rs`
+- [X] T015 补齐 coverage version 1 所需 syscall 名称/编号、b64/b32 双向解析和 `<512` 范围验证于 `crates/auditd-ebpf-rules/src/syscalls/x86_64.rs`
+- [X] T016 运行 `cargo fmt --check`、`cargo clippy -p auditd-ebpf-common -p auditd-ebpf-rules --all-targets -- -D warnings` 和两 crate 全量测试，并记录通过结果于 `docs/watch-foundation-validation.md`
+- [X] T017 在 T007–T016 全部通过后创建 `feat: compile watch permissions into syscall coverage` 里程碑提交，提交范围为 `crates/auditd-ebpf-common/`、`crates/auditd-ebpf-rules/`、`docs/watch-foundation-validation.md`
 
 **Checkpoint**: 规则库能生成非空、版本化、双 ABI 的 watch 运行计划；用户故事实现可以开始。
 

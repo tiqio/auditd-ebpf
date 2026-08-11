@@ -1,4 +1,5 @@
-use auditd_ebpf_rules::{ArgvOutput, RuleCompiler, parse_rules};
+use auditd_ebpf_common::permission::PermissionMask;
+use auditd_ebpf_rules::{Arch, ArgvOutput, RuleCompiler, parse_rules, syscall_number};
 
 #[test]
 fn compiler_preserves_first_match_and_builds_generation_plan() {
@@ -49,4 +50,39 @@ fn every_exact_match_condition_changes_rule_version() {
     )
     .unwrap();
     assert_ne!(base.version_hash, changed.version_hash);
+}
+
+#[test]
+fn watch_compiles_to_non_empty_permission_tables_for_both_abis() {
+    let plan = RuleCompiler::compile(
+        parse_rules("watch.rules", "-w /tmp/ddtest -p rw -k ddtest").unwrap(),
+        0,
+        Default::default(),
+    )
+    .unwrap();
+
+    for arch in [Arch::B64, Arch::B32] {
+        let openat = syscall_number(arch, "openat").unwrap() as usize;
+        let (syscalls, permissions) = match arch {
+            Arch::B64 => (&plan.syscalls_b64, &plan.permission_masks_b64),
+            Arch::B32 => (&plan.syscalls_b32, &plan.permission_masks_b32),
+        };
+        assert!(syscalls.contains(&(openat as u32)));
+        assert_eq!(
+            PermissionMask::from_bits(permissions[openat]).unwrap(),
+            PermissionMask::READ | PermissionMask::WRITE
+        );
+    }
+    assert_eq!(plan.coverage_by_rule.get(&0).unwrap().len(), 2);
+}
+
+#[test]
+fn syscall_perm_rejects_unknown_permission_class() {
+    let rules = parse_rules(
+        "unknown.rules",
+        "-a always,exit -F arch=b64 -S getpid -F perm=r -k invalid",
+    )
+    .unwrap();
+    let error = RuleCompiler::compile(rules, 0, Default::default()).unwrap_err();
+    assert_eq!(error.0[0].code, "E_PERMISSION_COVERAGE");
 }

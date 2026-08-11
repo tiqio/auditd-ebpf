@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use auditd_ebpf_common::permission::PermissionMask;
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Arch {
     B64,
@@ -42,12 +44,25 @@ pub struct RuleSet {
     pub version_hash: [u8; 32],
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RulePermissionCoverage {
+    pub arch: Arch,
+    pub requested_permissions: PermissionMask,
+    pub effective_syscalls: BTreeSet<u32>,
+    pub syscall_permission_masks: BTreeMap<u32, PermissionMask>,
+}
+
 #[derive(Clone, Debug)]
 pub struct KernelFilterPlan {
     pub generation: u8,
     pub rules: Vec<AuditRule>,
     pub syscalls_b64: BTreeSet<u32>,
     pub syscalls_b32: BTreeSet<u32>,
+    pub permission_masks_b64: [u8; 512],
+    pub permission_masks_b32: [u8; 512],
+    pub maintenance_syscalls_b64: BTreeSet<u32>,
+    pub maintenance_syscalls_b32: BTreeSet<u32>,
+    pub coverage_by_rule: BTreeMap<u32, BTreeMap<Arch, RulePermissionCoverage>>,
     pub exec_capture_enabled: bool,
     pub argv_overrides: BTreeMap<String, ArgvOutput>,
     pub version_hash: [u8; 32],
