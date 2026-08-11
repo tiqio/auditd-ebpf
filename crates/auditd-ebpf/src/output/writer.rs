@@ -119,6 +119,21 @@ impl<StdoutWriter: Write, StderrWriter: Write> OutputPipeline<StdoutWriter, Stde
             })
             .collect()
     }
+
+    #[must_use]
+    pub const fn queue_used_bytes(&self) -> usize {
+        self.queue.used_bytes()
+    }
+
+    #[must_use]
+    pub const fn queue_limit_bytes(&self) -> usize {
+        self.queue.limit_bytes()
+    }
+
+    #[must_use]
+    pub const fn queue_max_bytes(&self) -> usize {
+        self.queue.max_bytes()
+    }
 }
 
 impl OutputPipeline<Cursor<Vec<u8>>, Cursor<Vec<u8>>> {

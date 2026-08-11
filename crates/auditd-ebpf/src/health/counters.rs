@@ -5,6 +5,10 @@ pub struct HealthCounters {
     pub events_seen_total: u64,
     pub events_submitted_total: u64,
     pub ring_reserve_failed_total: u64,
+    pub inflight_dropped_total: u64,
+    pub correlation_missed_total: u64,
+    pub exec_argv_dropped_total: u64,
+    pub internal_dropped_total: u64,
     pub events_consumed_total: u64,
     pub events_matched_total: u64,
     pub events_unmatched_total: u64,
@@ -26,7 +30,11 @@ pub struct KernelCounterSample {
     pub events_seen_per_cpu: Vec<u64>,
     pub events_submitted_per_cpu: Vec<u64>,
     pub ring_reserve_failed_per_cpu: Vec<u64>,
+    pub inflight_dropped_per_cpu: Vec<u64>,
+    pub correlation_missed_per_cpu: Vec<u64>,
     pub exec_argv_captured_per_cpu: Vec<u64>,
+    pub exec_argv_dropped_per_cpu: Vec<u64>,
+    pub internal_dropped_per_cpu: Vec<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
@@ -74,15 +82,32 @@ impl HealthCounters {
         let events_seen_total = checked_sum(&sample.events_seen_per_cpu)?;
         let events_submitted_total = checked_sum(&sample.events_submitted_per_cpu)?;
         let ring_reserve_failed_total = checked_sum(&sample.ring_reserve_failed_per_cpu)?;
+        let inflight_dropped_total = checked_sum(&sample.inflight_dropped_per_cpu)?;
+        let correlation_missed_total = checked_sum(&sample.correlation_missed_per_cpu)?;
         let exec_argv_captured_total = checked_sum(&sample.exec_argv_captured_per_cpu)?;
+        let exec_argv_dropped_total = checked_sum(&sample.exec_argv_dropped_per_cpu)?;
+        let internal_dropped_total = checked_sum(&sample.internal_dropped_per_cpu)?;
         if events_seen_total != events_submitted_total.saturating_add(ring_reserve_failed_total) {
             return Err(CounterError::InvalidKernelSample);
         }
         self.events_seen_total = events_seen_total;
         self.events_submitted_total = events_submitted_total;
         self.ring_reserve_failed_total = ring_reserve_failed_total;
+        self.inflight_dropped_total = inflight_dropped_total;
+        self.correlation_missed_total = correlation_missed_total;
         self.exec_argv_captured_total = exec_argv_captured_total;
+        self.exec_argv_dropped_total = exec_argv_dropped_total;
+        self.internal_dropped_total = internal_dropped_total;
         Ok(())
+    }
+
+    #[must_use]
+    pub fn kernel_lost_total(&self) -> u64 {
+        self.ring_reserve_failed_total
+            .saturating_add(self.inflight_dropped_total)
+            .saturating_add(self.correlation_missed_total)
+            .saturating_add(self.exec_argv_dropped_total)
+            .saturating_add(self.internal_dropped_total)
     }
 }
 

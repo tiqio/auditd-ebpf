@@ -1,9 +1,10 @@
 use auditd_ebpf::{
+    health::counters::HealthCounters,
     identity::HostIdentity,
     output::{
         event_formatter::{AuditEvent, format_event},
         status_formatter::unclean_shutdown_gap,
-        status_formatter::{diagnostic, status},
+        status_formatter::{StatusRecord, diagnostic, status},
     },
     rules::argv_policy::EffectiveArgvOutput,
 };
@@ -105,7 +106,26 @@ fn diagnostic_and_status_match_golden_and_never_contain_argv() {
         "process_cache",
         b"context expired",
     );
-    let state = status(&identity, "degraded", 10, 2, false);
+    let counters = HealthCounters {
+        exec_argv_captured_total: 10,
+        exec_argv_suppressed_total: 2,
+        ..HealthCounters::default()
+    };
+    let state = status(
+        &identity,
+        &StatusRecord {
+            state: "degraded",
+            reason: Some("test_gap"),
+            uptime_seconds: 60,
+            rule_version: Some(7),
+            programs_attached: 5,
+            counters: &counters,
+            queue_used_bytes: 1024,
+            queue_limit_bytes: 2048,
+            queue_max_bytes: 4096,
+            final_record: false,
+        },
+    );
     assert_eq!(diag, include_str!("../../../tests/golden/events/diag.log"));
     assert_eq!(
         state,

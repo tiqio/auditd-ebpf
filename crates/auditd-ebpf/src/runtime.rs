@@ -21,6 +21,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use crate::{
     capabilities::drop_runtime_capabilities,
     collector::runtime::{CollectedRecord, CollectorGap, CollectorRuntime, CorrelatedExec},
+    health::counters::HealthCounters,
     identity::{HostIdentity, MachineIdSource},
     lifecycle::{
         model::{LifecycleMarker, LifecycleState},
@@ -30,7 +31,7 @@ use crate::{
     output::{
         adaptive_queue::{DEFAULT_INITIAL_BYTES, DEFAULT_MAX_BYTES},
         event_formatter::{AuditEvent, format_event},
-        status_formatter::{collector_gap, diagnostic, status, unclean_shutdown_gap},
+        status_formatter::{StatusRecord, collector_gap, diagnostic, status, unclean_shutdown_gap},
         writer::{OutputPipeline, WriterError},
     },
     process_cache::{
@@ -153,6 +154,7 @@ async fn run_async(
     global_argv_enabled: bool,
     argv_rules: &BTreeMap<String, bool>,
 ) -> i32 {
+    let started_at = Instant::now();
     // 信号 fd 必须在任何可能耗时的 load/attach 前注册。否则 dirty 已持久化但 attach 尚未完成
     // 的窗口里，SIGTERM 会执行默认动作，绕过排空与最终状态逻辑。
     let mut usr1 = match signal(SignalKind::user_defined1()) {
@@ -215,12 +217,13 @@ async fn run_async(
     let previous_dirty = previous
         .as_ref()
         .is_some_and(|marker| marker.state == LifecycleState::Dirty);
-    let dirty = LifecycleMarker::dirty(
+    let mut dirty = LifecycleMarker::dirty(
         read_trimmed("/proc/sys/kernel/random/boot_id").unwrap_or_else(|| "?".into()),
         read_trimmed("/proc/sys/kernel/random/uuid").unwrap_or_else(fallback_invocation_id),
         std::process::id(),
         now_millis(),
     );
+    dirty.rule_version = active_plan.as_ref().map(KernelFilterPlan::rule_version);
     if let Err(error) = state_file.write(&dirty) {
         eprintln!("type=AUDITD_EBPF_DIAG level=error code=lifecycle_dirty message={error}");
         return 4;
@@ -289,9 +292,6 @@ async fn run_async(
         {
             return 7;
         }
-        eprint!("{}", status(&identity, "degraded", 0, 0, false));
-    } else {
-        eprint!("{}", status(&identity, "healthy", 0, 0, false));
     }
 
     let mut collector = collector_resources.map(|(ring, process_cache)| {
@@ -306,12 +306,30 @@ async fn run_async(
             process_cache,
         )
     });
+    let mut active_rule_version = active_plan.as_ref().map(KernelFilterPlan::rule_version);
+    if emit_runtime_status(
+        &identity,
+        loaded_bpf.as_mut(),
+        collector.as_ref(),
+        previous_dirty,
+        started_at,
+        active_rule_version,
+        false,
+        None,
+    )
+    .is_err()
+    {
+        return 7;
+    }
+    let mut status_interval = tokio::time::interval(Duration::from_secs(10));
+    status_interval.tick().await;
 
     loop {
         tokio::select! {
             _ = usr1.recv() => {
-                let collector_degraded = collector.as_ref().is_some_and(KernelCollector::is_degraded);
-                eprint!("{}", status(&identity, if previous_dirty || collector_degraded { "degraded" } else { "healthy" }, 0, 0, false));
+                if emit_runtime_status(&identity, loaded_bpf.as_mut(), collector.as_ref(), previous_dirty, started_at, active_rule_version, false, None).is_err() {
+                    break;
+                }
             }
             _ = hangup.recv() => {
                 let Some(loaded) = loaded_bpf.as_mut() else {
@@ -326,11 +344,13 @@ async fn run_async(
                 let candidate = match compile_rules(rules_dir, argv_rules, generation) {
                     Ok(candidate) => candidate,
                     Err(error) => {
+                        if let Some(collector) = collector.as_ref() { collector.record_reload_failed(); }
                         eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=reload_rejected component=rules generation={} message={error:?}", identity.host, identity.machine_id, generation);
                         continue;
                     }
                 };
                 if let Err(error) = loaded.stage_inactive_rules(&candidate) {
+                    if let Some(collector) = collector.as_ref() { collector.record_reload_failed(); }
                     eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=reload_stage_failed component=runtime generation={} message={error:?}", identity.host, identity.machine_id, generation);
                     continue;
                 }
@@ -338,11 +358,13 @@ async fn run_async(
                 let previous = match engines.write() {
                     Ok(mut registry) => registry.install(candidate, global_argv_enabled),
                     Err(error) => {
+                        if let Some(collector) = collector.as_ref() { collector.record_reload_failed(); }
                         eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=reload_registry_failed component=runtime generation={} message={error:?}", identity.host, identity.machine_id, generation);
                         continue;
                     }
                 };
                 if let Err(error) = loaded.activate_generation(generation) {
+                    if let Some(collector) = collector.as_ref() { collector.record_reload_failed(); }
                     if let Ok(mut registry) = engines.write() {
                         registry.restore(generation, previous);
                     }
@@ -350,35 +372,71 @@ async fn run_async(
                     continue;
                 }
                 active_generation = generation;
+                active_rule_version = Some(rule_version);
+                if let Some(collector) = collector.as_ref() { collector.record_reload_success(); }
                 eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=info code=reload_applied component=runtime generation={} rule_version={} message=\"候选规则已完整验证并原子切换\"", identity.host, identity.machine_id, generation, rule_version);
+            }
+            _ = status_interval.tick() => {
+                if emit_runtime_status(&identity, loaded_bpf.as_mut(), collector.as_ref(), previous_dirty, started_at, active_rule_version, false, None).is_err() {
+                    break;
+                }
             }
             _ = term.recv() => break,
             _ = interrupt.recv() => break,
         }
     }
 
-    eprint!("{}", status(&identity, "stopping", 0, 0, false));
+    let _ = emit_runtime_status(
+        &identity,
+        loaded_bpf.as_mut(),
+        collector.as_ref(),
+        previous_dirty,
+        started_at,
+        active_rule_version,
+        false,
+        Some("stopping"),
+    );
     let drain = collector
         .as_mut()
         .map_or(DrainOutcome::Drained, |collector| {
             collector.stop(Duration::from_secs(30))
         });
-    eprint!("{}", status(&identity, "stopping", 0, 0, true));
+    let final_counters = match runtime_health_counters(
+        loaded_bpf.as_mut(),
+        collector.as_ref(),
+        previous_dirty,
+    ) {
+        Ok(counters) => counters,
+        Err(error) => {
+            eprintln!(
+                "type=AUDITD_EBPF_DIAG level=error code=final_counters component=runtime message={error:?}"
+            );
+            return 7;
+        }
+    };
+    eprint!(
+        "{}",
+        status(
+            &identity,
+            &status_record(
+                &final_counters,
+                collector.as_ref(),
+                started_at,
+                active_rule_version,
+                true,
+                "stopping",
+                None,
+                loaded_bpf.is_some()
+            )
+        )
+    );
     if io::stderr().flush().is_err() {
         return 7;
     }
-    let consumed = collector.as_ref().map_or(0, KernelCollector::consumed);
     drop(collector);
     // LoadedBpf 持有所有 Aya links/maps；先 drop 确保 detach 和 map 清理完成，之后才允许 clean。
     drop(loaded_bpf);
-    let clean = dirty.into_clean(BTreeMap::from([
-        ("events_seen".into(), consumed),
-        ("events_submitted".into(), consumed),
-        ("events_output".into(), 0),
-        ("ring_lost".into(), 0),
-        ("queue_lost".into(), 0),
-        ("path_lost".into(), 0),
-    ]));
+    let clean = dirty.into_clean(final_lifecycle_counters(&final_counters));
     if let Err(error) = state_file.write(&clean) {
         eprintln!("type=AUDITD_EBPF_DIAG level=error code=lifecycle_clean message={error}");
         return 7;
@@ -419,6 +477,138 @@ fn compile_rules(
         })
         .collect();
     RuleCompiler::compile(rules, generation, overrides).map_err(anyhow::Error::new)
+}
+
+fn runtime_health_counters(
+    loaded_bpf: Option<&mut LoadedBpf>,
+    collector: Option<&KernelCollector>,
+    previous_dirty: bool,
+) -> anyhow::Result<HealthCounters> {
+    let mut counters = HealthCounters::default();
+    if let Some(loaded) = loaded_bpf {
+        let mut applied = false;
+        for _ in 0..16 {
+            let sample = loaded.read_kernel_counters()?;
+            if counters.apply_kernel_sample(&sample).is_ok() {
+                applied = true;
+                break;
+            }
+            // PerCpuArray 的不同槽位无法在一个内核事务中读取；活跃 CPU 恰好在两次
+            // map lookup 之间更新时会出现瞬时不变量偏差，短暂重试而不是伪造或忽略。
+            thread::sleep(Duration::from_millis(1));
+        }
+        anyhow::ensure!(applied, "无法取得满足内核计数不变量的一致快照");
+    }
+    if let Some(collector) = collector {
+        let snapshot = collector.snapshot();
+        counters.events_consumed_total = snapshot.consumed;
+        counters.events_matched_total = snapshot.matched;
+        counters.events_unmatched_total = snapshot.unmatched;
+        counters.events_output_total = snapshot.output_succeeded;
+        counters.exec_argv_suppressed_total = snapshot.argv_suppressed;
+        counters.queue_dropped_total = snapshot.queue_dropped;
+        counters.path_resolution_failed_total = snapshot.path_resolution_failed;
+        counters.event_parse_failed_total = snapshot.parse_failed;
+        counters.stdout_write_failed_total = snapshot.stdout_failed;
+        counters.rule_reload_success_total = snapshot.reload_success;
+        counters.rule_reload_failed_total = snapshot.reload_failed;
+        counters.gap_records_generated_total = snapshot.gaps_generated;
+    }
+    counters.unclean_shutdown_detected_total = u64::from(previous_dirty);
+    anyhow::ensure!(counters.all_invariants_hold(), "运行时计数不变量被破坏");
+    Ok(counters)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn status_record<'a>(
+    counters: &'a HealthCounters,
+    collector: Option<&KernelCollector>,
+    started_at: Instant,
+    rule_version: Option<u64>,
+    final_record: bool,
+    state: &'a str,
+    reason: Option<&'a str>,
+    programs_attached: bool,
+) -> StatusRecord<'a> {
+    let collector = collector.map_or_else(CollectorSnapshot::default, KernelCollector::snapshot);
+    StatusRecord {
+        state,
+        reason,
+        uptime_seconds: started_at.elapsed().as_secs(),
+        rule_version,
+        programs_attached: if programs_attached { 5 } else { 0 },
+        counters,
+        queue_used_bytes: collector.queue_used_bytes,
+        queue_limit_bytes: collector.queue_limit_bytes,
+        queue_max_bytes: collector.queue_max_bytes,
+        final_record,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_runtime_status(
+    identity: &HostIdentity,
+    loaded_bpf: Option<&mut LoadedBpf>,
+    collector: Option<&KernelCollector>,
+    previous_dirty: bool,
+    started_at: Instant,
+    rule_version: Option<u64>,
+    final_record: bool,
+    state_override: Option<&str>,
+) -> anyhow::Result<HealthCounters> {
+    let programs_attached = loaded_bpf.is_some();
+    let counters = runtime_health_counters(loaded_bpf, collector, previous_dirty)?;
+    let collector_degraded = collector.is_some_and(KernelCollector::is_degraded);
+    let (state, reason) = if let Some(state) = state_override {
+        (state, None)
+    } else if previous_dirty {
+        ("degraded", Some("unclean_shutdown"))
+    } else if counters.kernel_lost_total() != 0 {
+        ("degraded", Some("kernel_event_loss"))
+    } else if counters.path_resolution_failed_total != 0 {
+        ("degraded", Some("path_resolution_failed"))
+    } else if collector_degraded {
+        ("degraded", Some("collector_gap"))
+    } else {
+        ("healthy", None)
+    };
+    eprint!(
+        "{}",
+        status(
+            identity,
+            &status_record(
+                &counters,
+                collector,
+                started_at,
+                rule_version,
+                final_record,
+                state,
+                reason,
+                programs_attached,
+            ),
+        )
+    );
+    Ok(counters)
+}
+
+fn final_lifecycle_counters(counters: &HealthCounters) -> BTreeMap<String, u64> {
+    BTreeMap::from([
+        ("events_seen".into(), counters.events_seen_total),
+        ("events_submitted".into(), counters.events_submitted_total),
+        ("events_consumed".into(), counters.events_consumed_total),
+        ("events_matched".into(), counters.events_matched_total),
+        ("events_output".into(), counters.events_output_total),
+        ("ring_lost".into(), counters.ring_reserve_failed_total),
+        ("kernel_lost".into(), counters.kernel_lost_total()),
+        ("queue_lost".into(), counters.queue_dropped_total),
+        ("path_lost".into(), counters.path_resolution_failed_total),
+        ("parse_failed".into(), counters.event_parse_failed_total),
+        ("stdout_failed".into(), counters.stdout_write_failed_total),
+        (
+            "gaps_generated".into(),
+            counters.gap_records_generated_total,
+        ),
+    ])
 }
 
 struct VersionedRuleEngine {
@@ -480,6 +670,14 @@ struct CollectorCounters {
     stdout_failed: AtomicU64,
     gaps_generated: AtomicU64,
     path_resolution_failed: AtomicU64,
+    matched: AtomicU64,
+    unmatched: AtomicU64,
+    argv_suppressed: AtomicU64,
+    reload_success: AtomicU64,
+    reload_failed: AtomicU64,
+    queue_used_bytes: AtomicU64,
+    queue_limit_bytes: AtomicU64,
+    queue_max_bytes: AtomicU64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -491,6 +689,14 @@ struct CollectorSnapshot {
     stdout_failed: u64,
     gaps_generated: u64,
     path_resolution_failed: u64,
+    matched: u64,
+    unmatched: u64,
+    argv_suppressed: u64,
+    reload_success: u64,
+    reload_failed: u64,
+    queue_used_bytes: u64,
+    queue_limit_bytes: u64,
+    queue_max_bytes: u64,
 }
 
 impl CollectorSnapshot {
@@ -514,7 +720,27 @@ impl CollectorCounters {
             stdout_failed: self.stdout_failed.load(Ordering::Relaxed),
             gaps_generated: self.gaps_generated.load(Ordering::Relaxed),
             path_resolution_failed: self.path_resolution_failed.load(Ordering::Relaxed),
+            matched: self.matched.load(Ordering::Relaxed),
+            unmatched: self.unmatched.load(Ordering::Relaxed),
+            argv_suppressed: self.argv_suppressed.load(Ordering::Relaxed),
+            reload_success: self.reload_success.load(Ordering::Relaxed),
+            reload_failed: self.reload_failed.load(Ordering::Relaxed),
+            queue_used_bytes: self.queue_used_bytes.load(Ordering::Relaxed),
+            queue_limit_bytes: self.queue_limit_bytes.load(Ordering::Relaxed),
+            queue_max_bytes: self.queue_max_bytes.load(Ordering::Relaxed),
         }
+    }
+
+    fn update_queue<StdoutWriter: Write, StderrWriter: Write>(
+        &self,
+        pipeline: &OutputPipeline<StdoutWriter, StderrWriter>,
+    ) {
+        self.queue_used_bytes
+            .store(pipeline.queue_used_bytes() as u64, Ordering::Relaxed);
+        self.queue_limit_bytes
+            .store(pipeline.queue_limit_bytes() as u64, Ordering::Relaxed);
+        self.queue_max_bytes
+            .store(pipeline.queue_max_bytes() as u64, Ordering::Relaxed);
     }
 }
 
@@ -547,6 +773,7 @@ impl KernelCollector {
                 DEFAULT_MAX_BYTES,
             )
             .expect("默认输出队列容量必须有效");
+            thread_counters.update_queue(&pipeline);
             'collect: loop {
                 let mut drained = false;
                 while let Some(item) = ring.next() {
@@ -592,6 +819,7 @@ impl KernelCollector {
                 if thread_stop.load(Ordering::Acquire) && !drained {
                     break;
                 }
+                thread_counters.update_queue(&pipeline);
                 thread::sleep(Duration::from_millis(1));
             }
             if let Err(error) = pipeline.flush() {
@@ -624,12 +852,20 @@ impl KernelCollector {
         DrainOutcome::Drained
     }
 
-    fn consumed(&self) -> u64 {
-        self.counters.snapshot().consumed
-    }
-
     fn is_degraded(&self) -> bool {
         self.counters.snapshot().is_degraded()
+    }
+
+    fn snapshot(&self) -> CollectorSnapshot {
+        self.counters.snapshot()
+    }
+
+    fn record_reload_success(&self) {
+        self.counters.reload_success.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_reload_failed(&self) {
+        self.counters.reload_failed.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -695,7 +931,7 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                             continue;
                         }
                     };
-                if let Some(line) = format_syscall_record(
+                if let Some((line, argv_suppressed)) = format_syscall_record(
                     &engine,
                     identity,
                     &event,
@@ -703,6 +939,10 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                     resolved_path.as_deref(),
                     state.output_sequence,
                 ) {
+                    counters.matched.fetch_add(1, Ordering::Relaxed);
+                    if argv_suppressed {
+                        counters.argv_suppressed.fetch_add(1, Ordering::Relaxed);
+                    }
                     let result = pipeline
                         .enqueue_audit(line.as_bytes())
                         .and_then(|_| pipeline.drain_all());
@@ -717,7 +957,10 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                             }
                         }
                     }
+                } else {
+                    counters.unmatched.fetch_add(1, Ordering::Relaxed);
                 }
+                counters.update_queue(pipeline);
                 apply_syscall_cache_updates(
                     &mut state.process_cache,
                     &event,
@@ -808,7 +1051,6 @@ fn emit_degraded_diagnostic<StdoutWriter: Write, StderrWriter: Write>(
         )
         .as_bytes(),
     );
-    let _ = pipeline.write_operational(status(identity, "degraded", 0, 0, false).as_bytes());
 }
 
 fn collector_gap_reason(gap: &CollectorGap) -> String {
@@ -979,7 +1221,7 @@ fn format_syscall_record(
     correlated_exec: Option<&CorrelatedExec>,
     resolved_path: Option<&Path>,
     output_sequence: u64,
-) -> Option<String> {
+) -> Option<(String, bool)> {
     let arch = match event.arch {
         0xc000_003e => Arch::B64,
         0x4000_0003 => Arch::B32,
@@ -1003,46 +1245,50 @@ fn format_syscall_record(
         .iter()
         .position(|byte| *byte == 0)
         .unwrap_or(event.comm.len());
-    Some(format_event(&AuditEvent {
-        unix_seconds: now.as_secs(),
-        millis: now.subsec_millis() as u16,
-        sequence: output_sequence,
-        host: identity.host.as_bytes(),
-        machine_id: &identity.machine_id,
-        event_id: event_id.as_bytes(),
-        rule_version: event.header.rule_version,
-        rule_id: matched.rule.rule_id,
-        key: matched.rule.key.as_bytes(),
-        arch: event.arch,
-        syscall,
-        operation: "syscall",
-        success: event.return_value >= 0,
-        exit: event.return_value,
-        pid,
-        // 当前 syscall tracepoint 事件中的 ppid 字段由内核程序固定为零，并非可信父进程
-        // 标识；在接入进程缓存关联前必须显式输出未知，禁止把零伪装成真实值。
-        ppid: None,
-        uid: event.uid,
-        gid: event.gid,
-        euid: event.euid,
-        egid: event.egid,
-        comm: &event.comm[..comm_length],
-        exe: None,
-        path: resolved_path.map_or(&[], |path| path.as_os_str().as_bytes()),
-        perm: None,
-        argv_output: match matched.argv_output {
-            EffectiveArgvOutput::Emitted => EffectiveArgvOutput::Emitted,
-            EffectiveArgvOutput::Suppressed => EffectiveArgvOutput::Suppressed,
-        },
-        argc: correlated_exec.map_or(0, |exec| exec.observed_argc),
-        argv: correlated_exec.map_or(&[], |exec| exec.argv.as_slice()),
-        argv_truncated: correlated_exec.is_some_and(|exec| exec.argv_flags != 0),
-        path_confidence: if resolved_path.is_some() {
-            "namespace-lexical"
-        } else {
-            "none"
-        },
-    }))
+    let argv_suppressed = matched.argv_output == EffectiveArgvOutput::Suppressed;
+    Some((
+        format_event(&AuditEvent {
+            unix_seconds: now.as_secs(),
+            millis: now.subsec_millis() as u16,
+            sequence: output_sequence,
+            host: identity.host.as_bytes(),
+            machine_id: &identity.machine_id,
+            event_id: event_id.as_bytes(),
+            rule_version: event.header.rule_version,
+            rule_id: matched.rule.rule_id,
+            key: matched.rule.key.as_bytes(),
+            arch: event.arch,
+            syscall,
+            operation: "syscall",
+            success: event.return_value >= 0,
+            exit: event.return_value,
+            pid,
+            // 当前 syscall tracepoint 事件中的 ppid 字段由内核程序固定为零，并非可信父进程
+            // 标识；在接入进程缓存关联前必须显式输出未知，禁止把零伪装成真实值。
+            ppid: None,
+            uid: event.uid,
+            gid: event.gid,
+            euid: event.euid,
+            egid: event.egid,
+            comm: &event.comm[..comm_length],
+            exe: None,
+            path: resolved_path.map_or(&[], |path| path.as_os_str().as_bytes()),
+            perm: None,
+            argv_output: match matched.argv_output {
+                EffectiveArgvOutput::Emitted => EffectiveArgvOutput::Emitted,
+                EffectiveArgvOutput::Suppressed => EffectiveArgvOutput::Suppressed,
+            },
+            argc: correlated_exec.map_or(0, |exec| exec.observed_argc),
+            argv: correlated_exec.map_or(&[], |exec| exec.argv.as_slice()),
+            argv_truncated: correlated_exec.is_some_and(|exec| exec.argv_flags != 0),
+            path_confidence: if resolved_path.is_some() {
+                "namespace-lexical"
+            } else {
+                "none"
+            },
+        }),
+        argv_suppressed,
+    ))
 }
 
 fn resolve_identity(node_name: Option<&str>) -> HostIdentity {
@@ -1127,7 +1373,7 @@ mod tests {
         assert!(snapshot.is_degraded());
         let operational = String::from_utf8_lossy(pipeline.stderr_bytes());
         assert!(operational.contains("code=collector_degraded"));
-        assert!(operational.contains("state=degraded"));
+        assert!(operational.contains("queue"));
     }
 
     #[test]

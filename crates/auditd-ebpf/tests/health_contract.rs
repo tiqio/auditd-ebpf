@@ -12,7 +12,12 @@ fn ebpf每cpu计数按字段求和且保持内核不变量() {
         events_seen_per_cpu: vec![4, 6],
         events_submitted_per_cpu: vec![3, 6],
         ring_reserve_failed_per_cpu: vec![1, 0],
+        inflight_dropped_per_cpu: vec![1, 2],
+        correlation_missed_per_cpu: vec![0, 1],
         exec_argv_captured_per_cpu: vec![2, 3],
+        exec_argv_dropped_per_cpu: vec![1, 0],
+        internal_dropped_per_cpu: vec![0, 2],
+        ..KernelCounterSample::default()
     };
     let mut counters = HealthCounters::default();
     counters.apply_kernel_sample(&sample).unwrap();
@@ -21,6 +26,11 @@ fn ebpf每cpu计数按字段求和且保持内核不变量() {
     assert_eq!(counters.events_submitted_total, 9);
     assert_eq!(counters.ring_reserve_failed_total, 1);
     assert_eq!(counters.exec_argv_captured_total, 5);
+    assert_eq!(counters.inflight_dropped_total, 3);
+    assert_eq!(counters.correlation_missed_total, 1);
+    assert_eq!(counters.exec_argv_dropped_total, 1);
+    assert_eq!(counters.internal_dropped_total, 2);
+    assert_eq!(counters.kernel_lost_total(), 8);
     assert!(counters.kernel_invariant_holds());
 }
 
@@ -113,6 +123,7 @@ fn 内核计数不变量破坏会进入unhealthy() {
         events_submitted_per_cpu: vec![10],
         ring_reserve_failed_per_cpu: vec![1],
         exec_argv_captured_per_cpu: vec![0],
+        ..KernelCounterSample::default()
     };
 
     assert!(reporter.update_kernel_counters(&invalid).is_err());

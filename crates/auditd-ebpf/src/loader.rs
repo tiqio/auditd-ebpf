@@ -2,8 +2,9 @@ use std::{fs, path::Path};
 
 use anyhow::Context;
 use auditd_ebpf_common::counters::{
-    COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED, COUNTER_EXEC_ARGV_CAPTURED,
-    COUNTER_RINGBUF_DROPPED,
+    COUNTER_CORRELATION_MISSED, COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED,
+    COUNTER_EXEC_ARGV_CAPTURED, COUNTER_EXEC_ARGV_DROPPED, COUNTER_INFLIGHT_DROPPED,
+    COUNTER_INTERNAL_DROPPED, COUNTER_RINGBUF_DROPPED,
 };
 use auditd_ebpf_rules::KernelFilterPlan;
 use aya::{
@@ -120,7 +121,11 @@ impl LoadedBpf {
             events_seen_per_cpu: read_per_cpu(&counters, COUNTER_EVENTS_SEEN)?,
             events_submitted_per_cpu: read_per_cpu(&counters, COUNTER_EVENTS_SUBMITTED)?,
             ring_reserve_failed_per_cpu: read_per_cpu(&counters, COUNTER_RINGBUF_DROPPED)?,
+            inflight_dropped_per_cpu: read_per_cpu(&counters, COUNTER_INFLIGHT_DROPPED)?,
+            correlation_missed_per_cpu: read_per_cpu(&counters, COUNTER_CORRELATION_MISSED)?,
             exec_argv_captured_per_cpu: read_per_cpu(&counters, COUNTER_EXEC_ARGV_CAPTURED)?,
+            exec_argv_dropped_per_cpu: read_per_cpu(&counters, COUNTER_EXEC_ARGV_DROPPED)?,
+            internal_dropped_per_cpu: read_per_cpu(&counters, COUNTER_INTERNAL_DROPPED)?,
         })
     }
 }

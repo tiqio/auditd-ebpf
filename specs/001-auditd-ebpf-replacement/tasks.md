@@ -317,7 +317,7 @@ Setup → Foundational → US1 (MVP) → US2 → US3 → Polish/Release
 - [X] T117 CRITICAL：在加载 eBPF、打开所需资源并完成初始化后主动降低进程 capabilities，保留运行期最小权限并增加特权集成测试，涉及 `crates/auditd-ebpf/src/runtime.rs`、`tests/privileged/` per SR-002 (missing)
 - [X] T118 CRITICAL：将进程与挂载缓存接入运行时路径解析，按事件进程 root、mount namespace、cwd 和 dirfd 解析 path/dir，并在无法可靠关联时输出 gap、累计路径缺口和进入 degraded，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/path_resolution/` per FR-008a (partial)
 - [X] T119 实现 SIGHUP 候选规则的完整验证、版本分配和原子替换，失败时保留上一完整版本并输出可操作诊断，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf-rules/src/` per FR-005 (missing)
-- [ ] T120 使用内核每 CPU 丢失计数、collector、队列、解析和输出计数生成状态与 clean 生命周期快照，移除从 consumed 推导及硬编码零值，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/lifecycle/` per FR-011/FR-012a (contradicts)
+- [X] T120 使用内核每 CPU 丢失计数、collector、队列、解析和输出计数生成状态与 clean 生命周期快照，移除从 consumed 推导及硬编码零值，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/lifecycle/` per FR-011/FR-012a (contradicts)
 - [ ] T121 在默认规则目录没有可用规则时回退读取 `/etc/audit/audit.rules`，保持整套验证、拒绝部分生效和版本语义一致，涉及 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf-rules/src/loader.rs` per FR-001 (partial)
 - [ ] T122 将 benchmark `compare` 从仅生成计划扩展为实际执行 syscall/path/mixed × capture-only/operational × auditd/auditd-ebpf 的随机化矩阵，并保留全部原始结果，涉及 `crates/auditd-ebpf-bench/src/main.rs`、`crates/auditd-ebpf-bench/src/runner.rs` per FR-014 (missing)
 - [ ] T123 实现 capture-only 与 operational 的真实等价 sink、服务启停、预热、120 秒测量、冷却和恢复编排，替换仅描述阶段的模式计划，涉及 `crates/auditd-ebpf-bench/src/modes/`、`crates/auditd-ebpf-bench/src/runners/` per FR-014 (partial)

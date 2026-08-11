@@ -93,4 +93,25 @@ wait "${pid}"
 pid=
 grep -q 'state = "clean"' "${state}"
 grep -q 'final=yes' "${stderr_file}"
+final_status=$(grep 'type=AUDITD_EBPF_STATUS.*final=yes' "${stderr_file}" | tail -n 1)
+status_value() {
+  local name=$1
+  sed -n "s/.* ${name}=\([0-9][0-9]*\) .*/\1/p" <<<"${final_status}"
+}
+events_seen=$(status_value events_seen)
+events_submitted=$(status_value events_submitted)
+events_consumed=$(status_value events_consumed)
+events_output=$(status_value events_output)
+reload_success=$(status_value reload_success)
+reload_failed=$(status_value reload_failed)
+for value in "${events_seen}" "${events_submitted}" "${events_consumed}" "${events_output}"; do
+  test -n "${value}"
+  (( value > 0 ))
+done
+test "${reload_success}" -eq 1
+test "${reload_failed}" -eq 1
+grep -q "events_seen = ${events_seen}" "${state}"
+grep -q "events_submitted = ${events_submitted}" "${state}"
+grep -q "events_consumed = ${events_consumed}" "${state}"
+grep -q "events_output = ${events_output}" "${state}"
 echo "US1 runtime reload PASS initial_version=${initial_version} active_version=${active_version}"
