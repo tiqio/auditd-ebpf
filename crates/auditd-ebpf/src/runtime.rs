@@ -9,7 +9,7 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
@@ -185,7 +185,7 @@ async fn run_async(
     };
     let mut active_plan = None;
     if let Some(loaded) = loaded_bpf.as_mut() {
-        let plan = match compile_rules(rules_dir, argv_rules) {
+        let plan = match compile_rules(rules_dir, argv_rules, 0) {
             Ok(plan) => plan,
             Err(error) => {
                 eprintln!(
@@ -227,6 +227,13 @@ async fn run_async(
     }
 
     let identity = resolve_identity(node_name);
+    let rule_engines = active_plan.as_ref().map(|plan| {
+        Arc::new(RwLock::new(RuleEngineRegistry::new(
+            plan.clone(),
+            global_argv_enabled,
+        )))
+    });
+    let mut active_generation = active_plan.as_ref().map_or(0, |plan| plan.generation);
     let collector_resources = if let Some(loaded) = loaded_bpf.as_mut() {
         if let Err(error) = loaded.attach_collection_programs() {
             eprintln!(
@@ -245,11 +252,7 @@ async fn run_async(
                         return 6;
                     }
                 };
-                Some((
-                    ring,
-                    active_plan.expect("加载 eBPF 时规则计划已编译"),
-                    process_cache,
-                ))
+                Some((ring, process_cache))
             }
             Err(error) => {
                 eprintln!(
@@ -291,12 +294,15 @@ async fn run_async(
         eprint!("{}", status(&identity, "healthy", 0, 0, false));
     }
 
-    let mut collector = collector_resources.map(|(ring, plan, process_cache)| {
+    let mut collector = collector_resources.map(|(ring, process_cache)| {
         KernelCollector::start(
             ring,
-            plan,
+            Arc::clone(
+                rule_engines
+                    .as_ref()
+                    .expect("加载 eBPF 时用户态规则引擎已创建"),
+            ),
             identity.clone(),
-            global_argv_enabled,
             process_cache,
         )
     });
@@ -308,7 +314,43 @@ async fn run_async(
                 eprint!("{}", status(&identity, if previous_dirty || collector_degraded { "degraded" } else { "healthy" }, 0, 0, false));
             }
             _ = hangup.recv() => {
-                eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=info code=reload_requested component=runtime message=\"SIGHUP\"", identity.host, identity.machine_id);
+                let Some(loaded) = loaded_bpf.as_mut() else {
+                    eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=reload_unavailable component=runtime message=\"未加载 eBPF 对象\"", identity.host, identity.machine_id);
+                    continue;
+                };
+                let Some(engines) = rule_engines.as_ref() else {
+                    eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=reload_unavailable component=runtime message=\"用户态规则引擎不存在\"", identity.host, identity.machine_id);
+                    continue;
+                };
+                let generation = 1 - active_generation;
+                let candidate = match compile_rules(rules_dir, argv_rules, generation) {
+                    Ok(candidate) => candidate,
+                    Err(error) => {
+                        eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=reload_rejected component=rules generation={} message={error:?}", identity.host, identity.machine_id, generation);
+                        continue;
+                    }
+                };
+                if let Err(error) = loaded.stage_inactive_rules(&candidate) {
+                    eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=reload_stage_failed component=runtime generation={} message={error:?}", identity.host, identity.machine_id, generation);
+                    continue;
+                }
+                let rule_version = candidate.rule_version();
+                let previous = match engines.write() {
+                    Ok(mut registry) => registry.install(candidate, global_argv_enabled),
+                    Err(error) => {
+                        eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=reload_registry_failed component=runtime generation={} message={error:?}", identity.host, identity.machine_id, generation);
+                        continue;
+                    }
+                };
+                if let Err(error) = loaded.activate_generation(generation) {
+                    if let Ok(mut registry) = engines.write() {
+                        registry.restore(generation, previous);
+                    }
+                    eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=reload_activate_failed component=runtime generation={} message={error:?}", identity.host, identity.machine_id, generation);
+                    continue;
+                }
+                active_generation = generation;
+                eprintln!("type=AUDITD_EBPF_DIAG host={} machine_id={} level=info code=reload_applied component=runtime generation={} rule_version={} message=\"候选规则已完整验证并原子切换\"", identity.host, identity.machine_id, generation, rule_version);
             }
             _ = term.recv() => break,
             _ = interrupt.recv() => break,
@@ -347,6 +389,7 @@ async fn run_async(
 fn compile_rules(
     rules_dir: &Path,
     argv_rules: &BTreeMap<String, bool>,
+    generation: u8,
 ) -> anyhow::Result<auditd_ebpf_rules::KernelFilterPlan> {
     let paths = sorted_rule_files(rules_dir).map_err(anyhow::Error::new)?;
     anyhow::ensure!(
@@ -375,7 +418,51 @@ fn compile_rules(
             )
         })
         .collect();
-    RuleCompiler::compile(rules, 0, overrides).map_err(anyhow::Error::new)
+    RuleCompiler::compile(rules, generation, overrides).map_err(anyhow::Error::new)
+}
+
+struct VersionedRuleEngine {
+    version: u64,
+    engine: Arc<RuleEngine>,
+}
+
+struct RuleEngineRegistry {
+    generations: [Option<VersionedRuleEngine>; 2],
+}
+
+impl RuleEngineRegistry {
+    fn new(plan: KernelFilterPlan, global_argv_enabled: bool) -> Self {
+        let mut registry = Self {
+            generations: [None, None],
+        };
+        registry.install(plan, global_argv_enabled);
+        registry
+    }
+
+    fn install(
+        &mut self,
+        plan: KernelFilterPlan,
+        global_argv_enabled: bool,
+    ) -> Option<VersionedRuleEngine> {
+        let generation = usize::from(plan.generation);
+        let version = plan.rule_version();
+        self.generations[generation].replace(VersionedRuleEngine {
+            version,
+            engine: Arc::new(RuleEngine::new(plan, global_argv_enabled)),
+        })
+    }
+
+    fn restore(&mut self, generation: u8, previous: Option<VersionedRuleEngine>) {
+        self.generations[usize::from(generation)] = previous;
+    }
+
+    fn engine_for_version(&self, version: u64) -> Option<Arc<RuleEngine>> {
+        self.generations
+            .iter()
+            .flatten()
+            .find(|entry| entry.version == version)
+            .map(|entry| Arc::clone(&entry.engine))
+    }
 }
 
 struct KernelCollector {
@@ -434,9 +521,8 @@ impl CollectorCounters {
 impl KernelCollector {
     fn start(
         mut ring: aya::maps::RingBuf<aya::maps::MapData>,
-        plan: KernelFilterPlan,
+        rule_engines: Arc<RwLock<RuleEngineRegistry>>,
         identity: HostIdentity,
-        global_argv_enabled: bool,
         process_cache: ProcessCache,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
@@ -444,9 +530,6 @@ impl KernelCollector {
         let thread_stop = Arc::clone(&stop);
         let thread_counters = Arc::clone(&counters);
         let thread = thread::spawn(move || {
-            // 按 key 策略已由 RuleCompiler 写入对应规则；全局开关只决定 Inherit 的最终值。
-            // 无论最终是否输出，内核侧仍捕获 argv，抑制仅发生在用户态 first-match 之后。
-            let engine = RuleEngine::new(plan, global_argv_enabled);
             let mut collector_runtime = CollectorRuntime::new(65_536, Duration::from_secs(30));
             let mut state = CollectorProcessingState {
                 completed_execs: BTreeMap::new(),
@@ -486,7 +569,7 @@ impl KernelCollector {
                     }
                     if process_collected_records(
                         collector_runtime.take_output(),
-                        &engine,
+                        &rule_engines,
                         &identity,
                         &mut state,
                         &mut pipeline,
@@ -498,7 +581,7 @@ impl KernelCollector {
                 collector_runtime.expire(Instant::now());
                 if process_collected_records(
                     collector_runtime.take_output(),
-                    &engine,
+                    &rule_engines,
                     &identity,
                     &mut state,
                     &mut pipeline,
@@ -558,7 +641,7 @@ struct CollectorProcessingState {
 
 fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
     records: Vec<CollectedRecord>,
-    engine: &RuleEngine,
+    rule_engines: &RwLock<RuleEngineRegistry>,
     identity: &HostIdentity,
     state: &mut CollectorProcessingState,
     pipeline: &mut OutputPipeline<StdoutWriter, StderrWriter>,
@@ -571,8 +654,28 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
             }
             CollectedRecord::Kernel(crate::collector::decode::KernelRecord::Syscall(event)) => {
                 let correlated = state.completed_execs.remove(&event.header.pid_tgid);
+                let engine = match rule_engines
+                    .read()
+                    .ok()
+                    .and_then(|registry| registry.engine_for_version(event.header.rule_version))
+                {
+                    Some(engine) => engine,
+                    None => {
+                        let reason = format!(
+                            "rule_version_unavailable:version={}",
+                            event.header.rule_version
+                        );
+                        if submit_gap(pipeline, identity, counters, &reason, state.output_sequence)
+                        {
+                            return true;
+                        }
+                        state.output_sequence = state.output_sequence.wrapping_add(1);
+                        apply_syscall_cache_updates(&mut state.process_cache, &event, None);
+                        continue;
+                    }
+                };
                 let resolved_path =
-                    match resolve_syscall_path(&mut state.process_cache, engine, &event) {
+                    match resolve_syscall_path(&mut state.process_cache, &engine, &event) {
                         Ok(path) => path,
                         Err(reason) => {
                             counters
@@ -593,7 +696,7 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                         }
                     };
                 if let Some(line) = format_syscall_record(
-                    engine,
+                    &engine,
                     identity,
                     &event,
                     correlated.as_ref(),
@@ -1082,6 +1185,50 @@ mod tests {
         assert!(reason.contains("path_resolution_failed"));
         assert!(reason.contains("tid=4294967295"));
         assert!(reason.contains("syscall=openat"));
+    }
+
+    #[test]
+    fn 双generation规则引擎按事件版本选择() {
+        let initial_rules = parse_rules(
+            "initial.rules",
+            "-a always,exit -F arch=b64 -S execve -k initial\n",
+        )
+        .unwrap();
+        let initial = RuleCompiler::compile(initial_rules, 0, BTreeMap::new()).unwrap();
+        let initial_version = initial.rule_version();
+        let mut registry = RuleEngineRegistry::new(initial, true);
+
+        let reloaded_rules = parse_rules(
+            "reloaded.rules",
+            "-a always,exit -F arch=b64 -S execve -k reloaded\n",
+        )
+        .unwrap();
+        let reloaded = RuleCompiler::compile(reloaded_rules, 1, BTreeMap::new()).unwrap();
+        let reloaded_version = reloaded.rule_version();
+        registry.install(reloaded, true);
+
+        let event = CandidateEvent::new(Arch::B64, "execve");
+        assert_eq!(
+            registry
+                .engine_for_version(initial_version)
+                .unwrap()
+                .evaluate(&event)
+                .unwrap()
+                .rule
+                .key,
+            "initial"
+        );
+        assert_eq!(
+            registry
+                .engine_for_version(reloaded_version)
+                .unwrap()
+                .evaluate(&event)
+                .unwrap()
+                .rule
+                .key,
+            "reloaded"
+        );
+        assert!(registry.engine_for_version(u64::MAX).is_none());
     }
 
     fn path_engine(path: &str) -> RuleEngine {

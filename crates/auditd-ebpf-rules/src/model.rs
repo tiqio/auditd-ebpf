@@ -52,3 +52,15 @@ pub struct KernelFilterPlan {
     pub argv_overrides: BTreeMap<String, ArgvOutput>,
     pub version_hash: [u8; 32],
 }
+
+impl KernelFilterPlan {
+    /// 输出事件和内核 map 使用 SHA-256 摘要的前 64 位作为紧凑规则版本。
+    #[must_use]
+    pub fn rule_version(&self) -> u64 {
+        u64::from_le_bytes(
+            self.version_hash[..8]
+                .try_into()
+                .expect("SHA-256 前 8 字节长度固定"),
+        )
+    }
+}

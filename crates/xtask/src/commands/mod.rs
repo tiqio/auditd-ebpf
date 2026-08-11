@@ -264,6 +264,11 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         ]),
     )
     .context("US2 日志 quickstart 门禁失败")?;
+    run(Command::new("tests/privileged/rule_reload.sh").args([
+        "target/debug/auditd-ebpf",
+        object.to_str().context("eBPF 对象路径不是 UTF-8")?,
+    ]))
+    .context("US1 运行时规则重载门禁失败")?;
     Ok(())
 }
 

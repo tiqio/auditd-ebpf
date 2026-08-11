@@ -31,14 +31,19 @@ impl LoadedBpf {
     }
 
     pub fn stage_rules(&mut self, plan: &KernelFilterPlan) -> anyhow::Result<()> {
+        self.stage_inactive_rules(plan)?;
+        self.activate_generation(plan.generation)
+    }
+
+    /// 只填充指定 generation 的完整规则数据，不切换当前活动 generation。
+    ///
+    /// reload 必须先完成此步骤和用户态引擎安装，最后才写 `ACTIVE_GENERATION`，
+    /// 从而避免内核看到只写入一半的候选规则。
+    pub fn stage_inactive_rules(&mut self, plan: &KernelFilterPlan) -> anyhow::Result<()> {
         let generation = u32::from(plan.generation);
         let bitmap_b64 = syscall_bitmap(&plan.syscalls_b64);
         let bitmap_b32 = syscall_bitmap(&plan.syscalls_b32);
-        let rule_version = u64::from_le_bytes(
-            plan.version_hash[..8]
-                .try_into()
-                .expect("SHA-256 前 8 字节长度固定"),
-        );
+        let rule_version = plan.rule_version();
         Array::<_, [u64; 8]>::try_from(
             self.inner
                 .map_mut("SYSCALL_BITMAPS_B64")
@@ -57,12 +62,18 @@ impl LoadedBpf {
                 .context("缺少 RULE_VERSIONS")?,
         )?
         .set(generation, rule_version, 0)?;
+        Ok(())
+    }
+
+    /// 原子切换内核读取的活动 generation；此前候选 generation 必须已完整填充。
+    pub fn activate_generation(&mut self, generation: u8) -> anyhow::Result<()> {
+        anyhow::ensure!(generation <= 1, "generation 只能为 0/1");
         Array::<_, u32>::try_from(
             self.inner
                 .map_mut("ACTIVE_GENERATION")
                 .context("缺少 ACTIVE_GENERATION")?,
         )?
-        .set(0, generation, 0)?;
+        .set(0, u32::from(generation), 0)?;
         Ok(())
     }
 
