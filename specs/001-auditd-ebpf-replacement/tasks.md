@@ -134,9 +134,9 @@ rsyslog 逐字节保留策略后源记录，suppressed 事件显示 `argv_output
 
 - [X] T059 [P] [US2] 为固定字段顺序、`host`/`machine_id`、`argv_output=emitted|suppressed`、suppressed 无 `aN`、`AUDITD_EBPF`、`unclean_shutdown count=?` gap、diag 和 status 添加 golden contract test 于 `crates/auditd-ebpf/tests/event_format_golden.rs`、`tests/golden/events/`
 - [X] T060 [P] [US2] 为引号、反斜杠、CR/LF/NUL、非 UTF-8 和 16 KiB 上限添加属性测试于 `crates/auditd-ebpf/tests/event_escape.rs`
-- [ ] T061 [P] [US2] 为 emitted argv 原样输出、suppressed argv 不进入 stdout/stderr/gap/status/输出队列、审计 stdout、诊断/status stderr 和永久 EPIPE 退出码添加进程集成测试于 `tests/integration/output_streams.rs`、`crates/auditd-ebpf/tests/argv_suppression.rs`
-- [ ] T062 [P] [US2] 为 64 MiB 起始、80% 高水位、512 MiB 硬上限、缩容和 drop-new 添加失败测试于 `crates/auditd-ebpf/tests/adaptive_queue.rs`
-- [ ] T063 [P] [US2] 为计数不变量、`exec_argv_suppressed_total <= exec_argv_captured_total`、`unclean_shutdown_detected_total`、degraded 恢复窗口、生产策略状态、unhealthy 和 final 状态添加失败测试于 `crates/auditd-ebpf/tests/health_contract.rs`
+- [X] T061 [P] [US2] 为 emitted argv 原样输出、suppressed argv 不进入 stdout/stderr/gap/status/输出队列、审计 stdout、诊断/status stderr 和永久 EPIPE 退出码添加进程集成测试于 `tests/integration/output_streams.rs`、`crates/auditd-ebpf/tests/argv_suppression.rs`
+- [X] T062 [P] [US2] 为 64 MiB 起始、80% 高水位、512 MiB 硬上限、缩容和 drop-new 添加失败测试于 `crates/auditd-ebpf/tests/adaptive_queue.rs`
+- [X] T063 [P] [US2] 为计数不变量、`exec_argv_suppressed_total <= exec_argv_captured_total`、`unclean_shutdown_detected_total`、degraded 恢复窗口、生产策略状态、unhealthy 和 final 状态添加失败测试于 `crates/auditd-ebpf/tests/health_contract.rs`
 - [ ] T064 [P] [US2] 为 SIGUSR1、SIGTERM 排空、超时退出码 8、信号重入、优雅 clean、SIGKILL 保留 dirty 和重启 10 秒内 unknown-count gap 添加集成测试于 `tests/integration/signals.rs`、`tests/privileged/lifecycle_restart.sh`
 - [ ] T065 [P] [US2] 为 root 可信风险 TOML、生命周期 TOML `0600`/普通文件/可信父目录、未知版本/键、缺字段、符号链接/TOCTOU、策略摘要稳定性/不匹配、无时间到期、journal 获准组和 systemd capability 边界添加特权测试于 `tests/privileged/production_policy.sh`、`tests/privileged/lifecycle_state.sh`、`tests/privileged/systemd_journal.sh`
 - [ ] T066 [P] [US2] 为 rsyslog imjournal 游标、策略后 stdout 行逐字节一致、suppressed 无 `aN`、事件/状态分流、本地 `0640`/导出 `0600`、认证 TLS 服务端身份、逐目的地保留、断网队列和恢复添加特权测试于 `tests/privileged/rsyslog_pipeline.sh`、`tests/fixtures/rsyslog/`
@@ -145,7 +145,7 @@ rsyslog 逐字节保留策略后源记录，suppressed 事件显示 `argv_output
 
 - [X] T067 [US2] 实现启动时冻结配置 node name/hostname、应用专用 HMAC-SHA256 machine-id 摘要或未知诊断、固定字段顺序、audit msg、可逆字节转义、`argv_output`、suppressed 时省略全部 `aN`、argv 截断和 16 KiB 上限于 `crates/auditd-ebpf/src/identity.rs`、`crates/auditd-ebpf/src/output/event_formatter.rs`
 - [X] T068 [P] [US2] 实现绝不包含 argv 内容、携带稳定 host/machine_id、允许仅 `unclean_shutdown` 使用 `count=?` 的 `AUDITD_EBPF_GAP`/`DIAG`/`STATUS` 格式器及 argv captured/suppressed 状态字段于 `crates/auditd-ebpf/src/output/status_formatter.rs`
-- [ ] T069 [US2] 实现在 AdaptiveQueue 入队前移除 suppressed argv、collector→队列→stdout writer、按字节动态增长、硬上限 drop-new 和 flush 错误处理于 `crates/auditd-ebpf/src/output/writer.rs`、`crates/auditd-ebpf/src/output/adaptive_queue.rs`
+- [X] T069 [US2] 实现在 AdaptiveQueue 入队前移除 suppressed argv、collector→队列→stdout writer、按字节动态增长、硬上限 drop-new 和 flush 错误处理于 `crates/auditd-ebpf/src/output/writer.rs`、`crates/auditd-ebpf/src/output/adaptive_queue.rs`
 - [ ] T070 [US2] 实现 eBPF 每 CPU 计数聚合、`exec_argv_captured/suppressed` 不变量、`unclean_shutdown_detected_total`、生产策略状态、状态变化即时记录、10 秒周期/异常关闭告警和 5 分钟恢复窗口于 `crates/auditd-ebpf/src/health/reporter.rs`、`crates/auditd-ebpf/src/health/counters.rs`
 - [ ] T071 [US2] 实现 root 可信 lifecycle TOML 的同目录临时文件+同步+原子 rename+目录同步、attach/接收前 durable dirty、历史 dirty 的首个 `unclean_shutdown count=?` gap、停止排空/最终计数/link-map 清理后 durable clean 和完整启动/信号顺序于 `crates/auditd-ebpf/src/lifecycle/state_file.rs`、`crates/auditd-ebpf/src/runtime.rs`
 - [ ] T072 [US2] 实现有效策略 version 1 摘要、`print-policy-digest`、风险 TOML 与实际读取者/目的地/访问模式/TLS 身份/保留期双重校验，并将 production fail-closed 门禁组装进 `run`/`check-production` 于 `crates/auditd-ebpf/src/policy/digest.rs`、`crates/auditd-ebpf/src/policy/validate.rs`、`crates/auditd-ebpf/src/commands/print_policy_digest.rs`、`crates/auditd-ebpf/src/commands/check_production.rs`、`crates/auditd-ebpf/src/commands/run.rs`

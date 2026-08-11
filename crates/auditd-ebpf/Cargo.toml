@@ -16,6 +16,10 @@ path = "src/lib.rs"
 name = "rule_compatibility"
 path = "../../tests/integration/rule_compatibility.rs"
 
+[[test]]
+name = "output_streams"
+path = "../../tests/integration/output_streams.rs"
+
 [dependencies]
 anyhow.workspace = true
 auditd-ebpf-common = { path = "../auditd-ebpf-common", features = ["user"] }
