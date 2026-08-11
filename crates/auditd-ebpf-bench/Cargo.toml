@@ -10,5 +10,10 @@ name = "auditd-ebpf-bench"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
 clap.workspace = true
-
+hex.workspace = true
+serde.workspace = true
+serde_json = "1.0.143"
+sha2.workspace = true
+thiserror.workspace = true
