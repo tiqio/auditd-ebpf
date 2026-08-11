@@ -102,6 +102,9 @@ rules.d
    - 总 syscall bitmap：显式 `-S` 与权限覆盖的并集；
    - 每 syscall 请求权限掩码：用于内核快速跳过与当前规则无交集的动态 open；
    - 每规则覆盖摘要：供 `check-rules --print-normalized` 和测试验证。
+   当候选规则需要路径或 fd 关联时，总 bitmap 还必须自动加入版本化 maintenance syscall 集合：
+   `close`、`dup*`、受支持的 fd duplication、`chdir/fchdir` 以及 mount namespace/root 边界变化
+   调用。这些事件只更新缓存；没有显式规则或权限命中时不得输出审计记录。
 4. 任一请求权限在目标 ABI 上覆盖为空时，候选规则集整体失败；禁止保留空 `syscalls=` 的成功
    watch 计划。
 5. 内核输出的是“当前已加载规则请求且本次操作实际满足的权限集合”；用户态仍按每条规则的
@@ -149,6 +152,8 @@ rules.d
 - generation 0/1 同时 stage 总 syscall bitmap、permission mask、rule version 和用户态 RuleEngine。
 - 所有 map 写入完成后才切换 `ACTIVE_GENERATION`；失败时清理 inactive generation 并保留旧版。
 - 规则版本摘要纳入规范化 watch 权限和覆盖矩阵版本，确保权限表变化会产生新 rule version。
+- maintenance syscall 集合及其版本进入 KernelFilterPlan 和版本摘要；集合变化不得沿用旧 rule
+  version。
 
 ## Project Structure
 

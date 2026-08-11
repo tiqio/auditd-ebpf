@@ -85,3 +85,16 @@ O_RDONLY=read、O_WRONLY=write、O_RDWR=read+write。未知 access mode 不匹�
 - 原始 read/write 数据块事件
 - 其他架构和未列出的 syscall
 - 根目录级、相对路径、通配符和父目录跳转 watch
+
+## Maintenance Syscalls
+
+以下调用不属于 `rwxa` 覆盖，但在存在 path/dir/watch 规则时必须进入内核总 bitmap，以维护用户态
+关联：
+
+- FD lifecycle：`close`, `dup`, `dup2`, `dup3` 与实现声明支持的 fcntl duplication；
+- cwd lifecycle：`chdir`, `fchdir`；
+- root/mount boundary：`chroot`, `pivot_root`, `mount`, `umount2`, `unshare`, `setns`,
+  `mount_setattr` 及现有路径边界模块声明的等价调用。
+
+maintenance 事件没有显式 syscall 规则且没有 permission 命中时不得输出 WatchAuditEvent；它们只
+更新或失效 ProcessFileTable/ThreadPathContext。maintenance 集合必须版本化并进入规则摘要。

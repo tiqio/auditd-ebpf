@@ -76,12 +76,15 @@ durable lifecycle 文件继续只记录服务 clean/dirty、规则版本和累�
 | `rules` | Ordered rules | syscall 与 watch 规则原顺序 |
 | `syscalls_b64/b32` | 512-bit set | 显式 syscall 与权限展开后的并集 |
 | `permission_masks_b64/b32` | 512-byte table | 每 syscall 当前全部规则请求权限的并集 |
+| `maintenance_syscalls_b64/b32` | 512-bit set | FD、cwd、root 和 mount 边界缓存维护调用 |
 | `coverage_by_rule` | Rule ID -> coverage | 规则检查与用户态匹配依据 |
 | `version_hash` | 32 bytes | 规范化规则和 coverage version 的 SHA-256 |
 
 ### Invariants
 
 - `permission_masks[syscall] != 0` 时，对应 syscall 必须也在总 bitmap 中。
+- 存在 path/dir/watch 规则时，maintenance syscall 必须包含在总 bitmap；它们默认只更新缓存，
+  不构成规则命中。
 - active generation 切换前，总 bitmap、permission table 和 version 必须全部 stage 成功。
 - inactive generation 失败不得改变 active generation 或用户态 RuleEngine。
 

@@ -119,7 +119,22 @@ deprecated，并建议转换为 syscall 形式；同一文档说明文件 watch 
 - 原地逐 map 更新 active generation：拒绝。并发事件可能观察到新 bitmap 与旧权限表组合。
 - 重启服务应用 watch：拒绝。不满足现有 SIGHUP 原子重载规格。
 
-## 9. 参考源码、许可证与采用边界
+## 9. 缓存维护 syscall
+
+**Decision**: 只要规则集包含 path、dir 或 watch 条件，编译器就自动把 FD、cwd、root 和 mount
+边界维护 syscall 加入总 bitmap；这些事件更新用户态缓存但默认不输出。
+
+**Rationale**: 当前 eBPF 只采集 bitmap 中的调用。如果 watch 只展开 open/属性操作而不采集
+close、dup、chdir 和 mount 边界变化，用户态会保留过期 fd/path 并产生误报。维护集合必须和
+权限矩阵一样版本化、测试并参与 rule version。
+
+**Alternatives considered**:
+
+- 仅在 cache miss 时读取 `/proc`：拒绝作为唯一方案。无法及时发现 fd reuse 和 cwd/mount 变化，
+  且会把正常热路径变成频繁文件系统查询。
+- 为 maintenance syscall 输出普通事件：拒绝。没有规则命中时只应更新状态，避免额外日志噪声。
+
+## 10. 参考源码、许可证与采用边界
 
 | Project | Pinned commit | Reviewed paths | License impact | Adopted / Rejected |
 |---------|---------------|----------------|----------------|--------------------|
@@ -128,7 +143,7 @@ deprecated，并建议转换为 syscall 形式；同一文档说明文件 watch 
 | Aya | `15a0de1b363e51d55d0fca4245df54a61e8d5521` | `aya/src/maps/ring_buf.rs`, `aya-ebpf/src/maps` | MIT OR Apache-2.0；现有依赖，无新增许可证 | 采用现有 RingBuf/Array/PerCpuArray 模式；拒绝运行时 RingBuf 扩容假设 |
 | Falco libs | `1a1d1e7ec9374cff24e9d03f55422590acb8fc92` | `userspace/libsinsp` FD/event parser areas | Apache-2.0；只借鉴状态机，不复制代码 | 采用用户态维护 FD 元数据的思路；拒绝引入 Falco 依赖和完整事件模型 |
 
-## 10. Resolved Clarifications
+## 11. Resolved Clarifications
 
 - watch 首版路径语义：namespace lexical，不承诺 inode/hard-link 等价。
 - `r/w` 的主要 read/write 验收通过 open access mode 触发，不输出每次数据 I/O syscall。
