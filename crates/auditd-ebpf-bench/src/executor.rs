@@ -94,12 +94,16 @@ fn run_thread(
     while Instant::now() < deadline {
         let operation_start = Instant::now();
         let result = match scenario {
-            ScenarioArg::Syscall => syscall_operation(sequence ^ seed),
-            ScenarioArg::Path => path_operation(&root, sequence),
+            ScenarioArg::Syscall => {
+                syscall_operation(&operation_id('s', thread_index, sequence), sequence ^ seed)
+            }
+            ScenarioArg::Path => path_operation(&root, &operation_id('p', thread_index, sequence)),
             ScenarioArg::Mixed => match sequence % 10 {
-                0..=4 => syscall_operation(sequence ^ seed),
-                5..=7 => path_operation(&root, sequence),
-                _ => exec_operation(),
+                0..=4 => {
+                    syscall_operation(&operation_id('s', thread_index, sequence), sequence ^ seed)
+                }
+                5..=7 => path_operation(&root, &operation_id('p', thread_index, sequence)),
+                _ => exec_operation(&operation_id('e', thread_index, sequence)),
             },
         };
         if result.is_err() {
@@ -119,7 +123,12 @@ fn run_thread(
     Ok((sequence, failures, latencies))
 }
 
-fn syscall_operation(value: u64) -> Result<()> {
+fn syscall_operation(operation_id: &str, value: u64) -> Result<()> {
+    let mut comm = [0_u8; 16];
+    comm[..operation_id.len()].copy_from_slice(operation_id.as_bytes());
+    // SAFETY: PR_SET_NAME 最多读取 16 字节；comm 是有效且 NUL 结尾的栈数组。
+    let result = unsafe { libc::prctl(libc::PR_SET_NAME, comm.as_ptr()) };
+    anyhow::ensure!(result == 0, "设置 workload operation-id 失败");
     let mut bytes = value.to_le_bytes();
     // SAFETY: getpid 不接收指针且没有前置条件；这里只为确保产生真实 syscall。
     unsafe { libc::getpid() };
@@ -129,9 +138,9 @@ fn syscall_operation(value: u64) -> Result<()> {
     Ok(())
 }
 
-fn path_operation(root: &std::path::Path, sequence: u64) -> Result<()> {
-    let path = root.join(format!("entry-{}", sequence % 128));
-    let renamed = root.join(format!("renamed-{}", sequence % 128));
+fn path_operation(root: &std::path::Path, operation_id: &str) -> Result<()> {
+    let path = root.join(operation_id);
+    let renamed = root.join(format!("done-{operation_id}"));
     let mut file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -144,10 +153,18 @@ fn path_operation(root: &std::path::Path, sequence: u64) -> Result<()> {
     Ok(())
 }
 
-fn exec_operation() -> Result<()> {
-    let status = Command::new("/usr/bin/true").status()?;
+fn exec_operation(operation_id: &str) -> Result<()> {
+    let status = Command::new("/usr/bin/true").arg(operation_id).status()?;
     anyhow::ensure!(status.success(), "true 命令失败");
     Ok(())
+}
+
+fn operation_id(kind: char, thread_index: u16, sequence: u64) -> String {
+    format!(
+        "op{kind}{:02}{:010}",
+        thread_index % 100,
+        sequence % 10_000_000_000
+    )
 }
 
 fn percentile(sorted: &[u64], percentile: f64) -> f64 {
@@ -160,10 +177,17 @@ fn percentile(sorted: &[u64], percentile: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::percentile;
+    use super::{operation_id, percentile};
 
     #[test]
     fn 百分位使用固定最近秩() {
         assert_eq!(percentile(&[1, 2, 3, 4, 5], 0.95), 5.0);
+    }
+
+    #[test]
+    fn operation_id固定为comm可容纳的十五字节() {
+        let id = operation_id('s', 3, 42);
+        assert_eq!(id, "ops030000000042");
+        assert_eq!(id.len(), 15);
     }
 }

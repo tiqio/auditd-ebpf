@@ -77,7 +77,15 @@ where
             .iter()
             .find_map(|record| record.get("name"))
             .cloned();
-        events.insert(event_from_fields(syscall, path)?);
+        let mut combined = syscall.clone();
+        for record in &records {
+            for (name, value) in record {
+                combined
+                    .entry(name.clone())
+                    .or_insert_with(|| value.clone());
+            }
+        }
+        events.insert(event_from_fields(&combined, path)?);
     }
     Ok(NormalizationResult {
         events,
@@ -127,7 +135,11 @@ fn event_from_fields(
     path: Option<String>,
 ) -> Result<NormalizedEvent, NormalizationError> {
     Ok(NormalizedEvent {
-        operation_id: required(fields, "operation_id")?.to_owned(),
+        operation_id: fields
+            .get("operation_id")
+            .cloned()
+            .or_else(|| derive_operation_id(fields, path.as_deref()))
+            .ok_or(NormalizationError::MissingField("operation_id"))?,
         rule_key: required(fields, "key")?.to_owned(),
         syscall: required(fields, "syscall")?.to_owned(),
         success: match required(fields, "success")? {
@@ -138,6 +150,24 @@ fn event_from_fields(
         identity: required(fields, "identity")?.to_owned(),
         path,
     })
+}
+
+fn derive_operation_id(fields: &BTreeMap<String, String>, path: Option<&str>) -> Option<String> {
+    fields
+        .values()
+        .find_map(|value| operation_marker(value))
+        .or_else(|| path.and_then(operation_marker))
+}
+
+fn operation_marker(value: &str) -> Option<String> {
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .find(|part| {
+            part.len() == 15
+                && part.starts_with("op")
+                && part.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+        .map(str::to_owned)
 }
 
 fn required<'a>(

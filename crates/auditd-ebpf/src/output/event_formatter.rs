@@ -40,14 +40,18 @@ pub fn format_event(event: &AuditEvent<'_>) -> String {
         EffectiveArgvOutput::Emitted => "emitted",
         EffectiveArgvOutput::Suppressed => "suppressed",
     };
+    let operation_id = operation_id(event)
+        .map(|value| format!(" operation_id={value}"))
+        .unwrap_or_default();
     let mut line = format!(
-        "type=AUDITD_EBPF msg=audit({}.{:03}:{}) schema=1 host={} machine_id={} event_id={} rule_version={} rule_id={} key={} arch={:08x} syscall={} operation={} success={} exit={} pid={} ppid={} uid={} gid={} euid={} egid={} comm={} exe={} path={} perm={} argv_output={} argc={}",
+        "type=AUDITD_EBPF msg=audit({}.{:03}:{}) schema=1 host={} machine_id={} event_id={}{} rule_version={} rule_id={} key={} arch={:08x} syscall={} operation={} success={} exit={} pid={} ppid={} uid={} gid={} euid={} egid={} comm={} exe={} path={} perm={} argv_output={} argc={}",
         event.unix_seconds,
         event.millis,
         event.sequence,
         escape(event.host),
         event.machine_id,
         escape(event.event_id),
+        operation_id,
         event.rule_version,
         event.rule_id,
         escape(event.key),
@@ -106,6 +110,17 @@ pub fn format_event(event: &AuditEvent<'_>) -> String {
         return fallback;
     }
     line
+}
+
+fn operation_id<'a>(event: &'a AuditEvent<'a>) -> Option<&'a str> {
+    event
+        .argv
+        .iter()
+        .filter_map(|value| std::str::from_utf8(value).ok())
+        .chain(std::str::from_utf8(event.comm).ok())
+        .chain(std::str::from_utf8(event.path).ok())
+        .flat_map(|value| value.split(|character: char| !character.is_ascii_alphanumeric()))
+        .find(|part| part.len() == 15 && part.starts_with("op"))
 }
 
 #[must_use]

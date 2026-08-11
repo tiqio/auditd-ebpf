@@ -191,7 +191,7 @@ rsyslog 逐字节保留策略后源记录，suppressed 事件显示 `argv_output
 - [X] T094 [US3] 实现等价非持久 sink、基线、预热、120 秒测量和冷却的 capture-only runner 于 `crates/auditd-ebpf-bench/src/modes/capture_only.rs`
 - [X] T095 [US3] 实现 auditd 文件日志与 journald/rsyslog 差异记录的 operational runner 于 `crates/auditd-ebpf-bench/src/modes/operational.rs`
 - [X] T096 [US3] 实现固定 seed 随机顺序、每场景至少 5 个有效样本、污染检测和恢复编排于 `crates/auditd-ebpf-bench/src/runner.rs`
-- [ ] T097 [US3] 执行预备基准并根据 perf 热点优化内核粗筛选、collector 和 formatter 于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`、`crates/auditd-ebpf/src/collector/runtime.rs`、`crates/auditd-ebpf/src/output/event_formatter.rs`
+- [X] T097 [US3] 执行预备基准并根据 perf 热点优化内核粗筛选、collector 和 formatter 于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`、`crates/auditd-ebpf/src/collector/runtime.rs`、`crates/auditd-ebpf/src/output/event_formatter.rs`
 - [ ] T098 [US3] 在隔离主机执行完整 syscall/path/mixed × capture-only/operational × 5+ 样本，并将动态报告目录及全部数据索引写入 `benchmarks/reports/final/manifest.json`
 - [ ] T099 [US3] 由第二名维护者复现方向并记录复现环境、差异、动态报告路径和签字结论于 `benchmarks/reports/final/reproduction.md`
 - [ ] T100 [US3] 运行 workload/correctness/statistics/report 测试，核对 SC-005–SC-007，并创建性能证明里程碑 commit，涉及 `crates/auditd-ebpf-bench/`、`benchmarks/reports/`
