@@ -5,18 +5,30 @@ use crate::{
     cli::{Cli, Command},
 };
 
+mod check_production;
 mod check_rules;
+mod print_policy_digest;
+mod run;
 
 pub fn execute() -> i32 {
     let cli = Cli::parse();
     match cli.command.unwrap_or(Command::Run {
         node_name: None,
         lifecycle_state_file: "/var/lib/auditd-ebpf/lifecycle.toml".into(),
+        deployment_mode: crate::cli::DeploymentMode::NonProduction,
+        risk_acceptance_file: None,
     }) {
         Command::Run {
             node_name,
             lifecycle_state_file,
-        } => crate::runtime::run(node_name.as_deref(), &lifecycle_state_file),
+            deployment_mode,
+            risk_acceptance_file,
+        } => run::run(
+            node_name.as_deref(),
+            &lifecycle_state_file,
+            deployment_mode,
+            risk_acceptance_file.as_deref(),
+        ),
         Command::CheckRules {
             rules_file,
             rules_dir,
@@ -34,14 +46,25 @@ pub fn execute() -> i32 {
         },
         Command::CheckProduction {
             risk_acceptance_file,
-        } => {
-            println!("check-production file={}", risk_acceptance_file.display());
-            0
-        }
-        Command::PrintPolicyDigest => {
-            println!("policy_digest_version=1");
-            0
-        }
+        } => match check_production::run(&risk_acceptance_file) {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!(
+                    "type=AUDITD_EBPF_DIAG level=error code={} component=policy message={:?}",
+                    error.code, error.message
+                );
+                9
+            }
+        },
+        Command::PrintPolicyDigest { value_only } => match print_policy_digest::run(value_only) {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!(
+                    "type=AUDITD_EBPF_DIAG level=error code=policy_digest_invalid component=policy message={error:?}"
+                );
+                2
+            }
+        },
         Command::PrintCapabilities => {
             let report = CapabilityProbe::inspect(&HostProbe::detect());
             println!(
