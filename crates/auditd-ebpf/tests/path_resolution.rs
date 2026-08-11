@@ -2,6 +2,7 @@ use std::path::Path;
 
 use auditd_ebpf::process_cache::{
     ProcessCache,
+    lifecycle::on_mount_boundary_change,
     model::{MountNamespaceId, ProcessIdentity},
     path::{PathError, normalize_in_boundary},
 };
@@ -37,6 +38,26 @@ fn resolves_absolute_cwd_and_dirfd_without_inode_claims() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn every_successful_namespace_boundary_change_invalidates_globally() {
+    for syscall in [
+        "mount",
+        "umount2",
+        "move_mount",
+        "mount_setattr",
+        "chroot",
+        "pivot_root",
+        "setns",
+        "unshare",
+    ] {
+        let mut cache = ProcessCache::default();
+        on_mount_boundary_change(&mut cache, syscall, false);
+        assert_eq!(cache.mount_epoch(), 0, "失败的 {syscall} 不应失效");
+        on_mount_boundary_change(&mut cache, syscall, true);
+        assert_eq!(cache.mount_epoch(), 1, "成功的 {syscall} 必须失效");
+    }
 }
 
 #[test]

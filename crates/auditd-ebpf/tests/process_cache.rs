@@ -77,3 +77,53 @@ fn bootstrap_discovers_the_current_thread_without_argv_storage() {
     assert!(current.root.is_some());
     assert!(current.mount_namespace.is_some());
 }
+
+#[test]
+fn clone_inherits_b32_but_pid_reuse_replaces_old_identity() {
+    let mut cache = ProcessCache::default();
+    let old_process = ProcessIdentity {
+        tgid: 40,
+        start_time: 100,
+    };
+    let namespace = MountNamespaceId {
+        device: 7,
+        inode: 8,
+    };
+    cache.insert_thread_with_abi(
+        old_process,
+        40,
+        "/",
+        "/old",
+        namespace,
+        ProcessAbi::B32,
+        "old mountinfo",
+    );
+    cache
+        .fork_thread(40, old_process, 41)
+        .expect("clone 线程应继承上下文");
+    assert_eq!(cache.thread(41).unwrap().abi, ProcessAbi::B32);
+    assert_eq!(cache.thread(41).unwrap().process, old_process);
+
+    cache.exit_thread(40);
+    let reused_process = ProcessIdentity {
+        tgid: 40,
+        start_time: 200,
+    };
+    cache.insert_thread_with_abi(
+        reused_process,
+        40,
+        "/",
+        "/new",
+        namespace,
+        ProcessAbi::B64,
+        "new mountinfo",
+    );
+    let reused = cache.thread(40).unwrap();
+    assert_eq!(reused.process, reused_process);
+    assert_eq!(reused.abi, ProcessAbi::B64);
+    assert_eq!(reused.cwd.as_deref().unwrap(), std::path::Path::new("/new"));
+
+    cache.exec_thread(40, ProcessAbi::B64).unwrap();
+    cache.exit_thread(41);
+    assert!(cache.thread(41).is_none());
+}

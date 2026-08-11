@@ -86,11 +86,11 @@ syscall、exec、绝对/相对/dirfd、mount namespace 和 chroot 路径操作�
 - [X] T033 [P] [US1] 为 syscall、ExecAttempt、ExecResult、fork/exit 和每 CPU 丢失记录添加 ABI 契约测试于 `crates/auditd-ebpf-common/tests/kernel_records.rs`
 - [X] T034 [P] [US1] 为 raw sys_enter/sys_exit 加载、粗筛选、返回值和 rule_version 添加特权失败测试于 `tests/privileged/syscall_capture.sh`
 - [X] T035 [P] [US1] 为 exec 成功/失败、32 参数、参数截断、全局/规则级抑制时仍提交 argv、attempt/result 缺失和进程缓存不保留 argv 添加特权失败测试于 `tests/privileged/exec_capture.sh`
-- [ ] T036 [P] [US1] 为 fork、clone、exec、exit、PID/TID 复用、B64/B32 继承和线程路径上下文隔离添加特权失败测试于 `tests/privileged/process_lifecycle.sh`
+- [X] T036 [P] [US1] 为 fork、clone、exec、exit、PID/TID 复用、B64/B32 继承和线程路径上下文隔离添加特权失败测试于 `tests/privileged/process_lifecycle.sh`
 - [X] T037 [P] [US1] 为 `/proc/<tid>/root`、`ns/mnt`、`mountinfo` bootstrap、cwd、dirfd、open/dup/close、全局 mount epoch 和路径置信度添加失败单元测试于 `crates/auditd-ebpf/tests/process_cache.rs`、`crates/auditd-ebpf/tests/path_resolution.rs`
-- [ ] T038 [P] [US1] 为绝对/cwd/dirfd 路径、rename/unlink、独立 mount namespace、bind/remount、chroot/pivot_root/setns/unshare 失效和无法解析 gap 添加特权失败测试于 `tests/privileged/path_rules.sh`、`tests/privileged/path_namespace.sh`
-- [ ] T039 [P] [US1] 为 SIGHUP 原子切换、并发事件版本和无效候选保留旧规则添加特权失败测试于 `tests/privileged/rule_reload.sh`
-- [ ] T040 [P] [US1] 为完整兼容 corpus、逐行拒绝和 `check-rules --print-normalized` 添加端到端失败测试于 `tests/integration/rule_compatibility.rs`、`tests/fixtures/rules/`
+- [X] T038 [P] [US1] 为绝对/cwd/dirfd 路径、rename/unlink、独立 mount namespace、bind/remount、chroot/pivot_root/setns/unshare 失效和无法解析 gap 添加特权失败测试于 `tests/privileged/path_rules.sh`、`tests/privileged/path_namespace.sh`
+- [X] T039 [P] [US1] 为 SIGHUP 原子切换、并发事件版本和无效候选保留旧规则添加特权失败测试于 `tests/privileged/rule_reload.sh`
+- [X] T040 [P] [US1] 为完整兼容 corpus、逐行拒绝和 `check-rules --print-normalized` 添加端到端失败测试于 `tests/integration/rule_compatibility.rs`、`tests/fixtures/rules/`
 
 ### Implementation
 
@@ -111,7 +111,7 @@ syscall、exec、绝对/相对/dirfd、mount namespace 和 chroot 路径操作�
 - [X] T055 [US1] 实现 arch/uid/gid/success/path/dir/perm 精确求值、process root+mount namespace 路径字符串语义、first-match、全局/唯一 key argv 输出决策和 `ResolvedAuditEvent.argv_output`，并明确不声明 symlink/inode/hard-link 等价于 `crates/auditd-ebpf/src/rules/engine.rs`、`crates/auditd-ebpf/src/rules/argv_policy.rs`、`crates/auditd-ebpf/src/rules/mod.rs`
 - [X] T056 [US1] 实现 inactive generation staging、原子切换、失败回滚和 SIGHUP reload service 于 `crates/auditd-ebpf/src/reload.rs`
 - [X] T057 [US1] 完成 `check-rules`、规范化输出、rule_version 状态和兼容矩阵生成于 `crates/auditd-ebpf/src/commands/check_rules.rs`、`crates/auditd-ebpf/src/commands/mod.rs`、`docs/rule-compatibility.md`
-- [ ] T058 [US1] 运行 parser/单 key/ABI/5.15+ 特权采集/mount namespace/chroot/路径 gap/reload 及 US1 quickstart 验证，并创建采集 MVP 里程碑 commit，涉及 `crates/auditd-ebpf-rules/`、`crates/auditd-ebpf-ebpf/`、`crates/auditd-ebpf/src/collector/`、`crates/auditd-ebpf/src/process_cache/`
+- [X] T058 [US1] 运行 parser/单 key/ABI/5.15+ 特权采集/mount namespace/chroot/路径 gap/reload 及 US1 quickstart 验证，并创建采集 MVP 里程碑 commit，涉及 `crates/auditd-ebpf-rules/`、`crates/auditd-ebpf-ebpf/`、`crates/auditd-ebpf/src/collector/`、`crates/auditd-ebpf/src/process_cache/`
 
 **Checkpoint**: US1 可通过内存 sink 独立证明规则兼容、采集正确性、路径缺口可见和原子重载。
 

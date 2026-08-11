@@ -1,3 +1,9 @@
 -a always,exit -S execve
--a always,exit -S openat -F auid=1000 -k unsupported
-
+-a always,exit -S openat -F auid=1000 -k unsupported-field
+-a never,exit -S execve -k unsupported-action
+-a always,task -S execve -k unsupported-list
+-a always,exit -F arch=arm64 -S execve -k unsupported-arch
+-a always,exit -S openat -F success=maybe -k invalid-success
+-a always,exit -S openat -F path=/tmp/../etc -k escaping-path
+-a always,exit -S execve -k one -F key=two
+-w relative/path -p wa -k relative-watch

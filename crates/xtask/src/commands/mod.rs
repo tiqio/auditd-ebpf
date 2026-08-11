@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    fs,
     path::Path,
     process::Command,
     time::{Duration, Instant},
@@ -71,7 +72,7 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
     let object = Path::new("target/bpfel-unknown-none/release/auditd-ebpf-ebpf");
     let rules = parse_rules(
         "kernel-smoke.rules",
-        "-a always,exit -F arch=b64 -S execve -k kernel-smoke\n",
+        "-a always,exit -F arch=b64 -S execve,openat,82,264,316,87,263,80,161,165,166,308,272,155,429,442 -k kernel-smoke\n",
     )?;
     let plan = RuleCompiler::compile(
         rules,
@@ -96,6 +97,24 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         .status()
         .context("无法触发长参数 execve")?;
     let _ = Command::new("/definitely/missing/auditd-ebpf-smoke").status();
+    let original_cwd = std::env::current_dir()?;
+    let path_root = std::env::temp_dir().join(format!("auditd-ebpf-kernel-{}", std::process::id()));
+    fs::create_dir_all(&path_root)?;
+    fs::write(path_root.join("absolute"), b"absolute")?;
+    std::env::set_current_dir(&path_root)?;
+    fs::write("relative", b"relative")?;
+    fs::rename("relative", "renamed")?;
+    fs::remove_file("renamed")?;
+    std::env::set_current_dir(&original_cwd)?;
+    if Command::new("python3").arg("--version").output().is_ok() {
+        let script = format!(
+            "import os; fd=os.open({root:?}, os.O_RDONLY); child=os.open('dirfd-file', os.O_CREAT|os.O_WRONLY, 0o600, dir_fd=fd); os.close(child); os.unlink('dirfd-file', dir_fd=fd); os.close(fd)",
+            root = path_root
+        );
+        Command::new("python3").arg("-c").arg(script).status()?;
+    }
+    fs::remove_file(path_root.join("absolute"))?;
+    fs::remove_dir(&path_root)?;
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut saw_syscall = false;
@@ -107,6 +126,7 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
     let mut saw_fork = false;
     let mut saw_process_exec = false;
     let mut saw_exit = false;
+    let mut saw_path = false;
     while Instant::now() < deadline
         && !(saw_syscall
             && saw_attempt
@@ -116,7 +136,8 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
             && saw_argument_truncation
             && saw_fork
             && saw_process_exec
-            && saw_exit)
+            && saw_exit
+            && saw_path)
     {
         while let Some(item) = ring.next() {
             match decode_owned(&item)? {
@@ -126,6 +147,13 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
                         && event.header.rule_version == expected_version =>
                 {
                     saw_syscall = true;
+                }
+                KernelRecord::Syscall(event)
+                    if event.header.rule_version == expected_version
+                        && event.return_value >= 0
+                        && event.path_len > 0 =>
+                {
+                    saw_path = true;
                 }
                 KernelRecord::ExecAttempt(event)
                     if event.header.rule_version == expected_version && event.argc_captured > 0 =>
@@ -168,15 +196,65 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         && saw_argument_truncation
         && saw_fork
         && saw_process_exec
-        && saw_exit)
+        && saw_exit
+        && saw_path)
     {
         bail!(
-            "内核采集不完整 syscall={saw_syscall} attempt={saw_attempt} result={saw_result} failed={saw_failed_result} argc_truncated={saw_argc_truncation} arg_truncated={saw_argument_truncation} fork={saw_fork} process_exec={saw_process_exec} exit={saw_exit}"
+            "内核采集不完整 syscall={saw_syscall} attempt={saw_attempt} result={saw_result} failed={saw_failed_result} argc_truncated={saw_argc_truncation} arg_truncated={saw_argument_truncation} fork={saw_fork} process_exec={saw_process_exec} exit={saw_exit} path={saw_path}"
         );
     }
+
+    Command::new("/bin/true").status()?;
+    let reloaded_rules = parse_rules(
+        "kernel-reloaded.rules",
+        "-a always,exit -F arch=b64 -S execve,openat,82,264,316,87,263,80,161,165,166,308,272,155,429,442 -k kernel-reloaded\n",
+    )?;
+    let reloaded_plan = RuleCompiler::compile(
+        reloaded_rules,
+        1,
+        BTreeMap::from([("kernel-reloaded".to_owned(), ArgvOutput::Disabled)]),
+    )?;
+    let reloaded_version = u64::from_le_bytes(reloaded_plan.version_hash[..8].try_into().unwrap());
+    let worker = std::thread::spawn(|| {
+        for _ in 0..16 {
+            let _ = Command::new("/bin/true").status();
+        }
+    });
+    std::thread::sleep(Duration::from_millis(5));
+    loaded.stage_rules(&reloaded_plan)?;
+    anyhow::ensure!(
+        parse_rules("invalid.rules", "-a always,exit -S execve").is_err(),
+        "无效候选规则必须在 staging 前失败"
+    );
+    Command::new("/bin/true").status()?;
+    worker
+        .join()
+        .map_err(|_| anyhow::anyhow!("并发 exec worker panic"))?;
+
+    let reload_deadline = Instant::now() + Duration::from_secs(5);
+    let mut saw_old_version = false;
+    let mut saw_new_version = false;
+    while Instant::now() < reload_deadline && !(saw_old_version && saw_new_version) {
+        while let Some(item) = ring.next() {
+            if let KernelRecord::Syscall(event) = decode_owned(&item)?
+                && event.syscall_nr == 59
+            {
+                match event.header.rule_version {
+                    version if version == expected_version => saw_old_version = true,
+                    version if version == reloaded_version => saw_new_version = true,
+                    version => bail!("并发 reload 观察到非法中间 rule_version={version}"),
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    anyhow::ensure!(
+        saw_old_version && saw_new_version,
+        "并发 reload 未同时观察到旧/新完整版本 old={saw_old_version} new={saw_new_version}"
+    );
     println!(
-        "内核采集 PASS kernel={} rule_version={expected_version}",
-        release.trim()
+        "内核采集 PASS kernel={} rule_version={expected_version} reloaded_version={reloaded_version}",
+        release.trim(),
     );
     Ok(())
 }
