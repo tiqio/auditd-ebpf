@@ -169,28 +169,28 @@ rsyslog 逐字节保留策略后源记录，suppressed 事件显示 `argv_output
 
 ### Tests First
 
-- [ ] T078 [P] [US3] 为 syscall workload 的操作序号、期望事件和固定 seed 可重复性添加失败测试于 `crates/auditd-ebpf-bench/tests/syscall_workload.rs`
-- [ ] T079 [P] [US3] 为 path/mixed workload 的绝对、cwd、dirfd、rename/unlink 和 exec 期望集合添加失败测试于 `crates/auditd-ebpf-bench/tests/path_mixed_workload.rs`
-- [ ] T080 [P] [US3] 为 auditd 与 auditd-ebpf 记录规范化、字段缺失和 event_id 去重添加失败测试于 `crates/auditd-ebpf-bench/tests/normalization.rs`
-- [ ] T081 [P] [US3] 为覆盖率、误报、重复、丢失计数和 invalid 判定添加失败 correctness gate 测试于 `crates/auditd-ebpf-bench/tests/correctness_gate.rs`
-- [ ] T082 [P] [US3] 为中位数、MAD、bootstrap CI、CPU/吞吐/延迟改善公式和阈值边界添加失败测试于 `crates/auditd-ebpf-bench/tests/statistics.rs`
-- [ ] T083 [P] [US3] 为随机运行顺序、污染样本、完整报告和禁止隐藏失败样本添加失败测试于 `crates/auditd-ebpf-bench/tests/report_contract.rs`
+- [X] T078 [P] [US3] 为 syscall workload 的操作序号、期望事件和固定 seed 可重复性添加失败测试于 `crates/auditd-ebpf-bench/tests/syscall_workload.rs`
+- [X] T079 [P] [US3] 为 path/mixed workload 的绝对、cwd、dirfd、rename/unlink 和 exec 期望集合添加失败测试于 `crates/auditd-ebpf-bench/tests/path_mixed_workload.rs`
+- [X] T080 [P] [US3] 为 auditd 与 auditd-ebpf 记录规范化、字段缺失和 event_id 去重添加失败测试于 `crates/auditd-ebpf-bench/tests/normalization.rs`
+- [X] T081 [P] [US3] 为覆盖率、误报、重复、丢失计数和 invalid 判定添加失败 correctness gate 测试于 `crates/auditd-ebpf-bench/tests/correctness_gate.rs`
+- [X] T082 [P] [US3] 为中位数、MAD、bootstrap CI、CPU/吞吐/延迟改善公式和阈值边界添加失败测试于 `crates/auditd-ebpf-bench/tests/statistics.rs`
+- [X] T083 [P] [US3] 为随机运行顺序、污染样本、完整报告和禁止隐藏失败样本添加失败测试于 `crates/auditd-ebpf-bench/tests/report_contract.rs`
 
 ### Implementation
 
-- [ ] T084 [US3] 实现 benchmark CLI、环境/场景/样本/报告模型和 protocol 版本于 `crates/auditd-ebpf-bench/src/cli.rs`、`crates/auditd-ebpf-bench/src/model.rs`、`crates/auditd-ebpf-bench/src/main.rs`
-- [ ] T085 [P] [US3] 实现固定 seed 的 syscall workload、operation-id 和期望事件生成于 `crates/auditd-ebpf-bench/src/workloads/syscall.rs`
-- [ ] T086 [P] [US3] 实现专用临时目录、绝对/cwd/dirfd 和文件操作 path workload 于 `crates/auditd-ebpf-bench/src/workloads/path.rs`
-- [ ] T087 [P] [US3] 实现进程 exec、syscall 和 path 固定比例 mixed workload 于 `crates/auditd-ebpf-bench/src/workloads/mixed.rs`
-- [ ] T088 [P] [US3] 实现硬件、内核/BTF hash、governor、affinity、日志配置、版本和 Git commit 采集于 `crates/auditd-ebpf-bench/src/environment.rs`
-- [ ] T089 [US3] 实现传统 auditd 启停、规则安装、RAW 事件收集、配置备份和恢复于 `crates/auditd-ebpf-bench/src/runners/auditd.rs`
-- [ ] T090 [P] [US3] 实现 auditd-ebpf 启停、规则安装、capture-only/operational sink 和最终计数收集于 `crates/auditd-ebpf-bench/src/runners/auditd_ebpf.rs`
-- [ ] T091 [P] [US3] 实现 perf stat、CPU/RSS、system 指标和 journal/rsyslog queue 采集于 `crates/auditd-ebpf-bench/src/metrics.rs`
-- [ ] T092 [US3] 实现 auditd 多记录与单行 eBPF 事件规范化、正确性集合比较和 invalid 原因于 `crates/auditd-ebpf-bench/src/correctness.rs`
-- [ ] T093 [US3] 实现中位数/MAD/bootstrap CI、规格阈值判定、完整 JSON 和 Markdown 报告于 `crates/auditd-ebpf-bench/src/statistics.rs`、`crates/auditd-ebpf-bench/src/report.rs`
-- [ ] T094 [US3] 实现等价非持久 sink、基线、预热、120 秒测量和冷却的 capture-only runner 于 `crates/auditd-ebpf-bench/src/modes/capture_only.rs`
-- [ ] T095 [US3] 实现 auditd 文件日志与 journald/rsyslog 差异记录的 operational runner 于 `crates/auditd-ebpf-bench/src/modes/operational.rs`
-- [ ] T096 [US3] 实现固定 seed 随机顺序、每场景至少 5 个有效样本、污染检测和恢复编排于 `crates/auditd-ebpf-bench/src/runner.rs`
+- [X] T084 [US3] 实现 benchmark CLI、环境/场景/样本/报告模型和 protocol 版本于 `crates/auditd-ebpf-bench/src/cli.rs`、`crates/auditd-ebpf-bench/src/model.rs`、`crates/auditd-ebpf-bench/src/main.rs`
+- [X] T085 [P] [US3] 实现固定 seed 的 syscall workload、operation-id 和期望事件生成于 `crates/auditd-ebpf-bench/src/workloads/syscall.rs`
+- [X] T086 [P] [US3] 实现专用临时目录、绝对/cwd/dirfd 和文件操作 path workload 于 `crates/auditd-ebpf-bench/src/workloads/path.rs`
+- [X] T087 [P] [US3] 实现进程 exec、syscall 和 path 固定比例 mixed workload 于 `crates/auditd-ebpf-bench/src/workloads/mixed.rs`
+- [X] T088 [P] [US3] 实现硬件、内核/BTF hash、governor、affinity、日志配置、版本和 Git commit 采集于 `crates/auditd-ebpf-bench/src/environment.rs`
+- [X] T089 [US3] 实现传统 auditd 启停、规则安装、RAW 事件收集、配置备份和恢复于 `crates/auditd-ebpf-bench/src/runners/auditd.rs`
+- [X] T090 [P] [US3] 实现 auditd-ebpf 启停、规则安装、capture-only/operational sink 和最终计数收集于 `crates/auditd-ebpf-bench/src/runners/auditd_ebpf.rs`
+- [X] T091 [P] [US3] 实现 perf stat、CPU/RSS、system 指标和 journal/rsyslog queue 采集于 `crates/auditd-ebpf-bench/src/metrics.rs`
+- [X] T092 [US3] 实现 auditd 多记录与单行 eBPF 事件规范化、正确性集合比较和 invalid 原因于 `crates/auditd-ebpf-bench/src/correctness.rs`
+- [X] T093 [US3] 实现中位数/MAD/bootstrap CI、规格阈值判定、完整 JSON 和 Markdown 报告于 `crates/auditd-ebpf-bench/src/statistics.rs`、`crates/auditd-ebpf-bench/src/report.rs`
+- [X] T094 [US3] 实现等价非持久 sink、基线、预热、120 秒测量和冷却的 capture-only runner 于 `crates/auditd-ebpf-bench/src/modes/capture_only.rs`
+- [X] T095 [US3] 实现 auditd 文件日志与 journald/rsyslog 差异记录的 operational runner 于 `crates/auditd-ebpf-bench/src/modes/operational.rs`
+- [X] T096 [US3] 实现固定 seed 随机顺序、每场景至少 5 个有效样本、污染检测和恢复编排于 `crates/auditd-ebpf-bench/src/runner.rs`
 - [ ] T097 [US3] 执行预备基准并根据 perf 热点优化内核粗筛选、collector 和 formatter 于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`、`crates/auditd-ebpf/src/collector/runtime.rs`、`crates/auditd-ebpf/src/output/event_formatter.rs`
 - [ ] T098 [US3] 在隔离主机执行完整 syscall/path/mixed × capture-only/operational × 5+ 样本，并将动态报告目录及全部数据索引写入 `benchmarks/reports/final/manifest.json`
 - [ ] T099 [US3] 由第二名维护者复现方向并记录复现环境、差异、动态报告路径和签字结论于 `benchmarks/reports/final/reproduction.md`

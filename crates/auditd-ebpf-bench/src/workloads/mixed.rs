@@ -37,7 +37,7 @@ pub fn generate(seed: u64, root: &Path, count: usize) -> Vec<WorkloadOperation> 
         });
     }
 
-    let mut rng = StableRng::new(seed ^ 0x6d69_7865_64);
+    let mut rng = StableRng::new(seed ^ 0x006d_6978_6564);
     for index in (1..operations.len()).rev() {
         let target = rng.index(index + 1);
         operations.swap(index, target);

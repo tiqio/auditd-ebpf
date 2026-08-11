@@ -6,7 +6,11 @@
 pub mod cli;
 pub mod correctness;
 pub mod environment;
+pub mod metrics;
 pub mod model;
+pub mod modes;
 pub mod report;
+pub mod runner;
+pub mod runners;
 pub mod statistics;
 pub mod workloads;
