@@ -662,15 +662,17 @@ fn format_syscall_record(
         success: event.return_value >= 0,
         exit: event.return_value,
         pid,
-        ppid: event.ppid,
+        // 当前 syscall tracepoint 事件中的 ppid 字段由内核程序固定为零，并非可信父进程
+        // 标识；在接入进程缓存关联前必须显式输出未知，禁止把零伪装成真实值。
+        ppid: None,
         uid: event.uid,
         gid: event.gid,
         euid: event.euid,
         egid: event.egid,
         comm: &event.comm[..comm_length],
-        exe: b"",
+        exe: None,
         path: path_bytes,
-        perm: "",
+        perm: None,
         argv_output: match matched.argv_output {
             EffectiveArgvOutput::Emitted => EffectiveArgvOutput::Emitted,
             EffectiveArgvOutput::Suppressed => EffectiveArgvOutput::Suppressed,

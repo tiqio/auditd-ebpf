@@ -18,15 +18,18 @@ pub struct AuditEvent<'a> {
     pub success: bool,
     pub exit: i64,
     pub pid: u32,
-    pub ppid: u32,
+    /// 仅在父进程标识由可信采集源提供时为 `Some`；禁止用零代替未知值。
+    pub ppid: Option<u32>,
     pub uid: u32,
     pub gid: u32,
     pub euid: u32,
     pub egid: u32,
     pub comm: &'a [u8],
-    pub exe: &'a [u8],
+    /// 可执行文件路径尚未可靠关联时为 `None`，格式化为 `exe=?`。
+    pub exe: Option<&'a [u8]>,
     pub path: &'a [u8],
-    pub perm: &'a str,
+    /// 权限语义无法从当前 syscall 事实可靠推导时为 `None`，格式化为 `perm=?`。
+    pub perm: Option<&'a str>,
     pub argv_output: EffectiveArgvOutput,
     pub argc: u32,
     pub argv: &'a [Vec<u8>],
@@ -43,6 +46,11 @@ pub fn format_event(event: &AuditEvent<'_>) -> String {
     let operation_id = operation_id(event)
         .map(|value| format!(" operation_id={value}"))
         .unwrap_or_default();
+    let ppid = event
+        .ppid
+        .map_or_else(|| "?".into(), |value| value.to_string());
+    let exe = event.exe.map_or_else(|| "?".into(), escape);
+    let perm = event.perm.unwrap_or("?");
     let mut line = format!(
         "type=AUDITD_EBPF msg=audit({}.{:03}:{}) schema=1 host={} machine_id={} event_id={}{} rule_version={} rule_id={} key={} arch={:08x} syscall={} operation={} success={} exit={} pid={} ppid={} uid={} gid={} euid={} egid={} comm={} exe={} path={} perm={} argv_output={} argc={}",
         event.unix_seconds,
@@ -61,15 +69,15 @@ pub fn format_event(event: &AuditEvent<'_>) -> String {
         if event.success { "yes" } else { "no" },
         event.exit,
         event.pid,
-        event.ppid,
+        ppid,
         event.uid,
         event.gid,
         event.euid,
         event.egid,
         escape(event.comm),
-        escape(event.exe),
+        exe,
         escape(event.path),
-        event.perm,
+        perm,
         argv_output,
         event.argc,
     );

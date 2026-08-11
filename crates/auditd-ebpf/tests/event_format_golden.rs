@@ -25,21 +25,37 @@ fn event(output: EffectiveArgvOutput, argv: &[Vec<u8>]) -> AuditEvent<'_> {
         success: true,
         exit: 0,
         pid: 1200,
-        ppid: 1180,
+        ppid: Some(1180),
         uid: 1000,
         gid: 1000,
         euid: 1000,
         egid: 1000,
         comm: b"bash",
-        exe: b"/usr/bin/id",
+        exe: Some(b"/usr/bin/id"),
         path: b"/usr/bin/id",
-        perm: "x",
+        perm: Some("x"),
         argv_output: output,
         argc: 2,
         argv,
         argv_truncated: false,
         path_confidence: "proc-snapshot",
     }
+}
+
+#[test]
+fn 重要但不可靠的字段显式输出未知值() {
+    let mut unknown = event(EffectiveArgvOutput::Suppressed, &[]);
+    unknown.ppid = None;
+    unknown.exe = None;
+    unknown.perm = None;
+
+    let line = format_event(&unknown);
+    assert!(line.contains(" ppid=? "));
+    assert!(line.contains(" exe=? "));
+    assert!(line.contains(" perm=? "));
+    assert!(!line.contains(" ppid=0 "));
+    assert!(!line.contains(" exe=\"\" "));
+    assert!(!line.contains(" perm= argv_output="));
 }
 
 #[test]
