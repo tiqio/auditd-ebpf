@@ -10,6 +10,7 @@ pub mod executor;
 pub mod metrics;
 pub mod model;
 pub mod modes;
+pub mod qualification;
 pub mod report;
 pub mod runner;
 pub mod runners;

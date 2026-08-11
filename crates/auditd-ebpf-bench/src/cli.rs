@@ -24,6 +24,11 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// 验证当前主机是否满足最终性能证据的隔离条件。
+    Qualify {
+        #[arg(long, default_value = "benchmarks/reports/final/qualification.json")]
+        output: PathBuf,
+    },
     /// 采集硬件、内核、日志栈和构建版本证据。
     Prepare {
         #[arg(long, default_value = "benchmarks/reports")]

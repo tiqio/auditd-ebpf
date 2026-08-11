@@ -19,3 +19,17 @@ fn resolves_getpid_for_operation_id_workload() {
         Some("getpid")
     );
 }
+
+#[test]
+fn resolves_path_workload_syscalls() {
+    for (name, number) in [("openat", 257), ("rename", 82), ("unlink", 87)] {
+        assert_eq!(
+            auditd_ebpf_rules::syscall_number(Arch::B64, name),
+            Some(number)
+        );
+        assert_eq!(
+            auditd_ebpf_rules::syscall_name(Arch::B64, number),
+            Some(name)
+        );
+    }
+}
