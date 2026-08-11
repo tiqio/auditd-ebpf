@@ -25,7 +25,7 @@ fn mount_epoch_invalidates_thread_contexts() {
 }
 
 #[test]
-fn lifecycle_and_fd_updates_remain_thread_local() {
+fn same_tgid_threads_share_fd_updates_and_close() {
     let mut cache = ProcessCache::default();
     let process = ProcessIdentity {
         tgid: 10,
@@ -57,14 +57,75 @@ fn lifecycle_and_fd_updates_remain_thread_local() {
         std::path::Path::new("/work/b")
     );
     assert_eq!(
-        cache.thread(11).unwrap().fd_table.get(&4).unwrap(),
+        cache.resolve_fd_path(12, 4).unwrap(),
         std::path::Path::new("/work/a/file")
     );
-    assert!(!cache.thread(12).unwrap().fd_table.contains_key(&4));
 
-    cache.close_fd(11, 4).unwrap();
+    cache.close_fd(12, 4).unwrap();
+    assert!(cache.resolve_fd_path(11, 4).is_err());
     cache.exit_thread(12);
     assert!(cache.thread(12).is_none());
+}
+
+#[test]
+fn forked_process_gets_snapshot_and_fd_reuse_overwrites_old_path() {
+    let mut cache = ProcessCache::default();
+    let parent = ProcessIdentity {
+        tgid: 50,
+        start_time: 100,
+    };
+    let child = ProcessIdentity {
+        tgid: 60,
+        start_time: 200,
+    };
+    let namespace = MountNamespaceId {
+        device: 1,
+        inode: 2,
+    };
+    cache.insert_thread(parent, 51, "/", "/work", namespace);
+    cache.open_fd(51, 3, "/work/original").unwrap();
+    cache.fork_thread(51, child, 61).unwrap();
+
+    cache.open_fd(51, 3, "/work/reused").unwrap();
+    assert_eq!(
+        cache.resolve_fd_path(51, 3).unwrap(),
+        std::path::Path::new("/work/reused")
+    );
+    assert_eq!(
+        cache.resolve_fd_path(61, 3).unwrap(),
+        std::path::Path::new("/work/original")
+    );
+}
+
+#[test]
+fn exec_refresh_failure_marks_shared_table_stale() {
+    let mut cache = ProcessCache::default();
+    let process = ProcessIdentity {
+        tgid: 70,
+        start_time: 300,
+    };
+    cache.insert_thread(
+        process,
+        71,
+        "/",
+        "/work",
+        MountNamespaceId {
+            device: 1,
+            inode: 2,
+        },
+    );
+    cache.open_fd(71, 4, "/work/file").unwrap();
+    cache.exec_thread(71, ProcessAbi::B64).unwrap();
+
+    assert!(cache.resolve_fd_path(71, 4).is_err());
+    assert_eq!(
+        cache
+            .file_table(process)
+            .unwrap()
+            .refresh_failure
+            .as_deref(),
+        Some("exec_proc_refresh_failed")
+    );
 }
 
 #[test]

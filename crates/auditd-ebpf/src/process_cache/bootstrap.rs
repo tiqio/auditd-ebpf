@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     fs::{self, File},
     io::Read,
     os::unix::fs::MetadataExt,
@@ -10,7 +9,11 @@ use anyhow::{Context, bail};
 
 use super::{
     ProcessCache,
-    model::{MountNamespaceId, ProcessAbi, ProcessIdentity, ThreadPathContext},
+    fd_table::associate_bootstrap,
+    model::{
+        BootstrapSnapshot, MountNamespaceId, ProcessAbi, ProcessFileTable, ProcessIdentity,
+        ThreadPathContext,
+    },
 };
 
 /// 扫描所有可见 `/proc/<tgid>/task/<tid>`。进程可能在扫描期间退出，单个条目失败时跳过；
@@ -32,30 +35,33 @@ pub fn scan_proc() -> anyhow::Result<ProcessCache> {
             let Some(tid) = parse_numeric_name(&task_entry.file_name()) else {
                 continue;
             };
-            if let Ok(context) = read_thread(tgid, tid) {
-                cache.insert_context(context);
+            if let Ok(snapshot) = read_thread(tgid, tid) {
+                cache.insert_context(snapshot);
             }
         }
     }
     Ok(cache)
 }
 
-pub fn current_thread() -> anyhow::Result<ThreadPathContext> {
+pub fn current_thread() -> anyhow::Result<BootstrapSnapshot> {
     let tid = std::process::id();
     read_thread(tid, tid)
 }
 
-pub fn read_thread(tgid: u32, tid: u32) -> anyhow::Result<ThreadPathContext> {
+pub fn read_thread(tgid: u32, tid: u32) -> anyhow::Result<BootstrapSnapshot> {
     let proc_tid = PathBuf::from(format!("/proc/{tgid}/task/{tid}"));
     let root_host = fs::read_link(proc_tid.join("root"))?;
     let cwd_host = fs::read_link(proc_tid.join("cwd"))?;
     let root = PathBuf::from("/");
     let cwd = namespace_path(&root_host, &cwd_host);
     let ns = fs::metadata(proc_tid.join("ns/mnt"))?;
-    let start_time = parse_start_time(&fs::read_to_string(proc_tid.join("stat"))?)?;
+    // 稳定进程身份必须使用 thread-group leader 的 starttime。同一 tgid 中各 tid 的
+    // task stat starttime 可以不同，若误用会把正常线程误判为 PID reuse 并删除共享表。
+    let start_time = parse_start_time(&fs::read_to_string(format!("/proc/{tgid}/stat"))?)?;
     let mountinfo = fs::read_to_string(proc_tid.join("mountinfo"))?;
     let abi = read_elf_abi(&proc_tid.join("exe")).unwrap_or(ProcessAbi::Unknown);
-    let mut fd_table: BTreeMap<i32, PathBuf> = BTreeMap::new();
+    let process = ProcessIdentity { tgid, start_time };
+    let mut file_table = ProcessFileTable::empty(process);
     if let Ok(entries) = fs::read_dir(proc_tid.join("fd")) {
         for entry in entries.flatten() {
             let Ok(fd) = entry.file_name().to_string_lossy().parse::<i32>() else {
@@ -64,23 +70,25 @@ pub fn read_thread(tgid: u32, tid: u32) -> anyhow::Result<ThreadPathContext> {
             if let Ok(target) = fs::read_link(entry.path())
                 && target.is_absolute()
             {
-                fd_table.insert(fd, namespace_path(&root_host, &target));
+                associate_bootstrap(&mut file_table, fd, &namespace_path(&root_host, &target), 0);
             }
         }
     }
-    Ok(ThreadPathContext {
-        process: ProcessIdentity { tgid, start_time },
-        tid,
-        root: Some(root),
-        mount_namespace: Some(MountNamespaceId {
-            device: ns.dev(),
-            inode: ns.ino(),
-        }),
-        mount_epoch: 0,
-        cwd: Some(cwd),
-        fd_table,
-        abi,
-        mountinfo,
+    Ok(BootstrapSnapshot {
+        thread: ThreadPathContext {
+            process,
+            tid,
+            root: Some(root),
+            mount_namespace: Some(MountNamespaceId {
+                device: ns.dev(),
+                inode: ns.ino(),
+            }),
+            mount_epoch: 0,
+            cwd: Some(cwd),
+            abi,
+            mountinfo,
+        },
+        file_table,
     })
 }
 

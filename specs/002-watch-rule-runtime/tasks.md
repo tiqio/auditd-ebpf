@@ -66,8 +66,8 @@
 
 - [X] T018 [P] [US1] 为 schema 1 保持布局、permission bits、bit 8 valid、未知 flags 和旧对象 flags=0 行为添加失败 ABI 测试于 `crates/auditd-ebpf-common/tests/abi_layout.rs`、`crates/auditd-ebpf-common/tests/kernel_records.rs`
 - [ ] T019 [P] [US1] 为 `CandidateEvent` permission 求交、O_RDWR 多权限、watch/syscall perm 一致性和首条规则顺序添加失败测试于 `crates/auditd-ebpf/tests/rule_engine.rs`
-- [ ] T020 [P] [US1] 将现有“FD 更新线程本地”断言改为同 tgid 共享，并添加 fork 快照、exec refresh、dup/close/fd reuse/stale 测试于 `crates/auditd-ebpf/tests/process_cache.rs`
-- [ ] T021 [P] [US1] 为 primary/secondary 独立 dirfd、fd-only 路径、截断、mount epoch 和 namespace lexical 边界添加失败测试于 `crates/auditd-ebpf/tests/path_resolution.rs`
+- [X] T020 [P] [US1] 将现有“FD 更新线程本地”断言改为同 tgid 共享，并添加 fork 快照、exec refresh、dup/close/fd reuse/stale 测试于 `crates/auditd-ebpf/tests/process_cache.rs`
+- [X] T021 [P] [US1] 为 primary/secondary 独立 dirfd、fd-only 路径、截断、mount epoch 和 namespace lexical 边界添加失败测试于 `crates/auditd-ebpf/tests/path_resolution.rs`
 - [ ] T022 [P] [US1] 为 `perm="r"`、`perm="w"`、`perm="rw"`、失败操作和 operation syscall 名添加失败 golden 于 `crates/auditd-ebpf/tests/event_format_golden.rs`、`tests/golden/events/`
 - [X] T023 [P] [US1] 创建真实内核 watch 测试骨架，先断言当前实现无法得到 r/w/rw 事件于 `tests/privileged/watch_rules.sh`
 
@@ -84,13 +84,13 @@
 
 ### Process FD and Path Semantics
 
-- [ ] T032 [US1] 将 `ThreadPathContext.fd_table` 重构为 `ProcessFileTable`、`FileAssociation`、Reliable/Stale/Unknown 状态和 stable ProcessIdentity 引用于 `crates/auditd-ebpf/src/process_cache/model.rs`、`crates/auditd-ebpf/src/process_cache/fd_table.rs`
-- [ ] T033 [US1] 让 `/proc` bootstrap 按 tgid 合并线程上下文和共享 FD 表，并保留 fd 来源、mount epoch 与刷新失败原因于 `crates/auditd-ebpf/src/process_cache/bootstrap.rs`
-- [ ] T034 [US1] 实现同 tgid 线程共享、fork 新进程快照、exec `/proc` 权威刷新、线程/进程退出清理和 PID reuse 防护于 `crates/auditd-ebpf/src/process_cache/lifecycle.rs`、`crates/auditd-ebpf/src/process_cache/mod.rs`
-- [ ] T035 [US1] 按成功结果实现 open/creat 覆盖、close 删除、dup/dup2/dup3/fcntl duplication 复制、fd reuse 覆盖和 maintenance-only 更新于 `crates/auditd-ebpf/src/process_cache/fd_table.rs`、`crates/auditd-ebpf/src/runtime.rs`
-- [ ] T036 [US1] 解析 primary/secondary 各自 dirfd、fd-only 目标和文档化路径求值顺序，并把缺失、截断、stale、mount 变化返回结构化原因于 `crates/auditd-ebpf/src/process_cache/path.rs`、`crates/auditd-ebpf/src/runtime.rs`
-- [ ] T037 [US1] 运行 process_cache/path_resolution 测试和 mount namespace 特权测试，将共享 FD、fork/exec 和 fd reuse 结果记录于 `docs/watch-path-validation.md`
-- [ ] T038 [US1] 在 T020–T021、T032–T037 通过后创建 `feat: correlate watch events with process file tables` 里程碑提交，提交范围为 `crates/auditd-ebpf/src/process_cache/`、`crates/auditd-ebpf/src/runtime.rs`、相关测试和 `docs/watch-path-validation.md`
+- [X] T032 [US1] 将 `ThreadPathContext.fd_table` 重构为 `ProcessFileTable`、`FileAssociation`、Reliable/Stale/Unknown 状态和 stable ProcessIdentity 引用于 `crates/auditd-ebpf/src/process_cache/model.rs`、`crates/auditd-ebpf/src/process_cache/fd_table.rs`
+- [X] T033 [US1] 让 `/proc` bootstrap 按 tgid 合并线程上下文和共享 FD 表，并保留 fd 来源、mount epoch 与刷新失败原因于 `crates/auditd-ebpf/src/process_cache/bootstrap.rs`
+- [X] T034 [US1] 实现同 tgid 线程共享、fork 新进程快照、exec `/proc` 权威刷新、线程/进程退出清理和 PID reuse 防护于 `crates/auditd-ebpf/src/process_cache/lifecycle.rs`、`crates/auditd-ebpf/src/process_cache/mod.rs`
+- [X] T035 [US1] 按成功结果实现 open/creat 覆盖、close 删除、dup/dup2/dup3/fcntl duplication 复制、fd reuse 覆盖和 maintenance-only 更新于 `crates/auditd-ebpf/src/process_cache/fd_table.rs`、`crates/auditd-ebpf/src/runtime.rs`
+- [X] T036 [US1] 解析 primary/secondary 各自 dirfd、fd-only 目标和文档化路径求值顺序，并把缺失、截断、stale、mount 变化返回结构化原因于 `crates/auditd-ebpf/src/process_cache/path.rs`、`crates/auditd-ebpf/src/runtime.rs`
+- [X] T037 [US1] 运行 process_cache/path_resolution 测试和 mount namespace 特权测试，将共享 FD、fork/exec 和 fd reuse 结果记录于 `docs/watch-path-validation.md`
+- [X] T038 [US1] 在 T020–T021、T032–T037 通过后创建 `feat: correlate watch events with process file tables` 里程碑提交，提交范围为 `crates/auditd-ebpf/src/process_cache/`、`crates/auditd-ebpf/src/runtime.rs`、相关测试和 `docs/watch-path-validation.md`
 
 ### Rule Match and Audit Output
 

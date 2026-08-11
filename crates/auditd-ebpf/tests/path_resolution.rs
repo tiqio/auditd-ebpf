@@ -90,3 +90,29 @@ fn stale_or_missing_context_produces_an_explicit_gap_reason() {
         Err(PathError::MissingThread)
     );
 }
+
+#[test]
+fn fd_only_resolution_uses_process_shared_table_and_rejects_stale_entries() {
+    let mut cache = ProcessCache::default();
+    let process = ProcessIdentity {
+        tgid: 20,
+        start_time: 30,
+    };
+    let namespace = MountNamespaceId {
+        device: 1,
+        inode: 2,
+    };
+    cache.insert_thread(process, 21, "/", "/work", namespace);
+    cache.fork_thread(21, process, 22).unwrap();
+    cache.open_fd(21, 7, "/work/fd-target").unwrap();
+
+    assert_eq!(
+        cache.resolve_fd_path(22, 7).unwrap(),
+        Path::new("/work/fd-target")
+    );
+    cache.invalidate_mounts();
+    assert_eq!(
+        cache.resolve_fd_path(22, 7),
+        Err(PathError::StaleFdAssociation)
+    );
+}

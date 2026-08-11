@@ -10,6 +10,10 @@ pub enum PathError {
     StaleMountEpoch,
     #[error("缺少 root、cwd 或 dirfd 路径")]
     MissingBase,
+    #[error("缺少可靠的 fd 路径关联")]
+    MissingFdAssociation,
+    #[error("fd 路径关联已失效")]
+    StaleFdAssociation,
     #[error("路径包含禁止的父目录或前缀组件")]
     EscapesBoundary,
 }

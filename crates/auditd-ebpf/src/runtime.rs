@@ -910,8 +910,8 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                         continue;
                     }
                 };
-                let resolved_path =
-                    match resolve_syscall_path(&mut state.process_cache, &engine, &event) {
+                let resolved_paths =
+                    match resolve_syscall_paths(&mut state.process_cache, &engine, &event) {
                         Ok(path) => path,
                         Err(reason) => {
                             counters
@@ -936,7 +936,7 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                     identity,
                     &event,
                     correlated.as_ref(),
-                    resolved_path.as_deref(),
+                    resolved_paths.first().map(PathBuf::as_path),
                     state.output_sequence,
                 ) {
                     counters.matched.fetch_add(1, Ordering::Relaxed);
@@ -964,7 +964,7 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                 apply_syscall_cache_updates(
                     &mut state.process_cache,
                     &event,
-                    resolved_path.as_deref(),
+                    resolved_paths.first().map(PathBuf::as_path),
                 );
             }
             CollectedRecord::Gap(gap) => {
@@ -1065,39 +1065,76 @@ fn collector_gap_reason(gap: &CollectorGap) -> String {
     }
 }
 
-fn resolve_syscall_path(
+fn resolve_syscall_paths(
     cache: &mut ProcessCache,
     engine: &RuleEngine,
     event: &auditd_ebpf_common::event::SyscallEvent,
-) -> Result<Option<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, String> {
     let arch = match event.arch {
         0xc000_003e => Arch::B64,
         0x4000_0003 => Arch::B32,
-        _ => return Ok(None),
+        _ => return Ok(Vec::new()),
     };
     let Some(syscall) = syscall_name(arch, event.syscall_nr) else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
-    let path_length = usize::from(event.path_len).min(event.path.len());
-    let path_bytes = &event.path[..path_length];
-    if path_bytes.is_empty() {
-        return Ok(None);
-    }
-    let raw = std::str::from_utf8(path_bytes)
-        .map_err(|error| format!("path_invalid_utf8:syscall={syscall}:error={error}"))?;
     let (tgid, tid) = process_ids(event.header.pid_tgid);
-    let dirfd = (event.dirfd != libc::AT_FDCWD).then_some(event.dirfd);
-    let resolve = |cache: &ProcessCache| cache.resolve_path(tid, dirfd, Path::new(raw));
+    if event.path_flags & auditd_ebpf_common::event::PATH_FLAG_TRUNCATED != 0
+        && engine.requires_resolved_path(arch, syscall)
+    {
+        return Err(format!(
+            "path_argument_truncated:tgid={tgid}:tid={tid}:syscall={syscall}"
+        ));
+    }
 
-    match resolve(cache) {
-        Ok(path) => Ok(Some(path)),
+    let mut requests = Vec::new();
+    push_path_request(
+        &mut requests,
+        &event.path,
+        event.path_len,
+        primary_dirfd(event),
+    );
+    push_path_request(
+        &mut requests,
+        &event.path2,
+        event.path2_len,
+        secondary_dirfd(arch, syscall, event),
+    );
+    if requests.is_empty() && is_fd_only_path_syscall(syscall) {
+        let fd = event.args[0] as i32;
+        let resolve = |cache: &ProcessCache| cache.resolve_fd_path(tid, fd);
+        if let Ok(path) = resolve(cache) {
+            return Ok(vec![path]);
+        }
+        if let Ok(snapshot) = bootstrap::read_thread(tgid, tid) {
+            cache.insert_context(snapshot);
+            if let Ok(path) = resolve(cache) {
+                return Ok(vec![path]);
+            }
+        }
+        if engine.requires_resolved_path(arch, syscall) {
+            return Err(format!(
+                "fd_association_missing:tgid={tgid}:tid={tid}:syscall={syscall}:fd={fd}"
+            ));
+        }
+        return Ok(Vec::new());
+    }
+
+    let resolve_all =
+        |cache: &ProcessCache| -> Result<Vec<PathBuf>, crate::process_cache::path::PathError> {
+            requests
+                .iter()
+                .map(|(raw, dirfd)| cache.resolve_path(tid, *dirfd, Path::new(raw)))
+                .collect()
+        };
+    match resolve_all(cache) {
+        Ok(paths) => Ok(paths),
         Err(first_error) => {
-            // 缓存缺失或 mount epoch 失效时只从事件进程自己的 /proc 视图刷新；绝不使用
-            // collector 进程的 cwd/root 猜测目标路径。
-            if let Ok(context) = bootstrap::read_thread(tgid, tid) {
-                cache.insert_context(context);
-                if let Ok(path) = resolve(cache) {
-                    return Ok(Some(path));
+            // 仅使用事件进程自己的 /proc 视图刷新，绝不借用 collector 的 cwd/root。
+            if let Ok(snapshot) = bootstrap::read_thread(tgid, tid) {
+                cache.insert_context(snapshot);
+                if let Ok(paths) = resolve_all(cache) {
+                    return Ok(paths);
                 }
             }
             if engine.requires_resolved_path(arch, syscall) {
@@ -1105,10 +1142,43 @@ fn resolve_syscall_path(
                     "path_resolution_failed:tgid={tgid}:tid={tid}:syscall={syscall}:reason={first_error}"
                 ))
             } else {
-                Ok(None)
+                Ok(Vec::new())
             }
         }
     }
+}
+
+fn push_path_request(
+    requests: &mut Vec<(String, Option<i32>)>,
+    bytes: &[u8],
+    declared_length: u16,
+    dirfd: Option<i32>,
+) {
+    let length = usize::from(declared_length).min(bytes.len());
+    let raw = &bytes[..length];
+    let raw = raw.strip_suffix(&[0]).unwrap_or(raw);
+    if let Ok(path) = std::str::from_utf8(raw)
+        && !path.is_empty()
+    {
+        requests.push((path.to_owned(), dirfd));
+    }
+}
+
+fn primary_dirfd(event: &auditd_ebpf_common::event::SyscallEvent) -> Option<i32> {
+    (event.dirfd != libc::AT_FDCWD).then_some(event.dirfd)
+}
+
+fn secondary_dirfd(
+    arch: Arch,
+    syscall: &str,
+    event: &auditd_ebpf_common::event::SyscallEvent,
+) -> Option<i32> {
+    let raw = match (arch, syscall) {
+        (_, "renameat" | "renameat2" | "linkat") => event.args[2] as i32,
+        (_, "symlinkat") => event.args[1] as i32,
+        _ => libc::AT_FDCWD,
+    };
+    (raw != libc::AT_FDCWD).then_some(raw)
 }
 
 fn apply_process_event(cache: &mut ProcessCache, event: &auditd_ebpf_common::event::ProcessEvent) {
@@ -1175,6 +1245,9 @@ fn apply_syscall_cache_updates(
             "dup2" | "dup3" => {
                 let _ = cache.duplicate_fd(tid, event.args[0] as i32, event.args[1] as i32);
             }
+            "fcntl" if matches!(event.args[1] as i32, libc::F_DUPFD | libc::F_DUPFD_CLOEXEC) => {
+                let _ = cache.duplicate_fd(tid, event.args[0] as i32, event.return_value as i32);
+            }
             "chdir" => {
                 if let Some(path) = resolved_path {
                     let _ = cache.change_cwd(tid, path);
@@ -1200,6 +1273,20 @@ fn apply_syscall_cache_updates(
     {
         cache.insert_context(context);
     }
+}
+
+fn is_fd_only_path_syscall(syscall: &str) -> bool {
+    matches!(
+        syscall,
+        "ftruncate"
+            | "fallocate"
+            | "fchmod"
+            | "fchown"
+            | "fgetxattr"
+            | "flistxattr"
+            | "fsetxattr"
+            | "fremovexattr"
+    )
 }
 
 const fn process_ids(pid_tgid: u64) -> (u32, u32) {
@@ -1416,8 +1503,8 @@ mod tests {
         let event = syscall_event(42, 43, 5, b"file");
 
         assert_eq!(
-            resolve_syscall_path(&mut cache, &engine, &event).unwrap(),
-            Some(PathBuf::from("/srv/base/file"))
+            resolve_syscall_paths(&mut cache, &engine, &event).unwrap(),
+            vec![PathBuf::from("/srv/base/file")]
         );
     }
 
@@ -1427,10 +1514,60 @@ mod tests {
         let engine = path_engine("/srv/base/file");
         let event = syscall_event(u32::MAX - 1, u32::MAX, 5, b"file");
 
-        let reason = resolve_syscall_path(&mut cache, &engine, &event).unwrap_err();
+        let reason = resolve_syscall_paths(&mut cache, &engine, &event).unwrap_err();
         assert!(reason.contains("path_resolution_failed"));
         assert!(reason.contains("tid=4294967295"));
         assert!(reason.contains("syscall=openat"));
+    }
+
+    #[test]
+    fn dual_path分别使用自己的dirfd且截断明确失败() {
+        let mut cache = ProcessCache::default();
+        cache.insert_thread(
+            ProcessIdentity {
+                tgid: 44,
+                start_time: 2,
+            },
+            45,
+            "/",
+            "/work",
+            MountNamespaceId {
+                device: 1,
+                inode: 2,
+            },
+        );
+        cache.open_fd(45, 5, "/old/base").unwrap();
+        cache.open_fd(45, 6, "/new/base").unwrap();
+        let rules = parse_rules(
+            "dual.rules",
+            "-a always,exit -F arch=b64 -S renameat -F path=/new/base/new -k dual\n",
+        )
+        .unwrap();
+        let engine = RuleEngine::new(
+            RuleCompiler::compile(rules, 0, BTreeMap::new()).unwrap(),
+            true,
+        );
+        let mut event = syscall_event(44, 45, 5, b"old");
+        event.syscall_nr = 264;
+        event.args[2] = 6;
+        event.path2_len = 3;
+        event.path2[..3].copy_from_slice(b"new");
+        event.path_flags |= auditd_ebpf_common::event::PATH_FLAG_SECONDARY_PRESENT;
+
+        assert_eq!(
+            resolve_syscall_paths(&mut cache, &engine, &event).unwrap(),
+            vec![
+                PathBuf::from("/old/base/old"),
+                PathBuf::from("/new/base/new")
+            ]
+        );
+
+        event.path_flags |= auditd_ebpf_common::event::PATH_FLAG_TRUNCATED;
+        assert!(
+            resolve_syscall_paths(&mut cache, &engine, &event)
+                .unwrap_err()
+                .contains("path_argument_truncated")
+        );
     }
 
     #[test]
