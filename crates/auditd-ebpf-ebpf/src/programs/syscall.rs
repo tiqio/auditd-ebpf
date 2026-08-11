@@ -2,15 +2,15 @@ use auditd_ebpf_common::{
     SCHEMA_VERSION,
     event::{
         KernelEventHeader, MAX_PATH_ARG_BYTES, PATH_FLAG_MOUNT_BOUNDARY_CHANGED,
-        PATH_FLAG_PRIMARY_PRESENT, PATH_FLAG_SECONDARY_PRESENT, PATH_FLAG_TRUNCATED, RecordType,
-        SyscallEvent,
+        PATH_FLAG_PRIMARY_PRESENT, PATH_FLAG_SECONDARY_PRESENT, PATH_FLAG_TRUNCATED,
+        PERMISSION_VALID, RecordType, SyscallEvent,
     },
 };
 use aya_ebpf::{
     bindings::pt_regs,
     helpers::{
         bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid,
-        bpf_get_smp_processor_id, bpf_ktime_get_ns, bpf_probe_read_kernel,
+        bpf_get_smp_processor_id, bpf_ktime_get_ns, bpf_probe_read_kernel, bpf_probe_read_user,
         bpf_probe_read_user_str_bytes,
     },
     macros::raw_tracepoint,
@@ -19,14 +19,18 @@ use aya_ebpf::{
 
 use crate::maps::{
     ACTIVE_GENERATION, COUNTER_CORRELATION_MISSED, COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED,
-    COUNTER_INFLIGHT_DROPPED, COUNTER_INTERNAL_DROPPED, COUNTER_RINGBUF_DROPPED, EVENT_COUNTERS,
-    EVENTS, INFLIGHT_SYSCALLS, InflightSyscall, PROCESS_ABI, RULE_VERSIONS, SYSCALL_BITMAPS_B32,
-    SYSCALL_BITMAPS_B64, SYSCALL_EVENT_SCRATCH, SYSCALL_SCRATCH,
+    COUNTER_INFLIGHT_DROPPED, COUNTER_INTERNAL_DROPPED, COUNTER_PERMISSION_CLASSIFICATION_FAILED,
+    COUNTER_RINGBUF_DROPPED, EVENT_COUNTERS, EVENTS, INFLIGHT_SYSCALLS, InflightSyscall,
+    MAINTENANCE_BITMAPS_B32, MAINTENANCE_BITMAPS_B64, PERMISSION_MASKS_B32, PERMISSION_MASKS_B64,
+    PROCESS_ABI, RULE_VERSIONS, SYSCALL_BITMAPS_B32, SYSCALL_BITMAPS_B64, SYSCALL_EVENT_SCRATCH,
+    SYSCALL_SCRATCH,
 };
 use crate::programs::exec::{argv_pointer_index, capture_attempt, emit_result, is_exec_syscall};
 
 const AUDIT_ARCH_X86_64: u32 = 0xc000_003e;
 const AUDIT_ARCH_I386: u32 = 0x4000_0003;
+const PERM_WRITE: u8 = 1 << 1;
+const PERM_READ: u8 = 1 << 2;
 
 #[raw_tracepoint]
 pub fn auditd_sys_enter(context: RawTracePointContext) -> u32 {
@@ -58,6 +62,25 @@ fn try_sys_enter(context: &RawTracePointContext) -> Result<u32, i32> {
     // helper 负责探测内核地址，失败时直接放弃本次事件，不解引用任意地址。
     let regs = unsafe { bpf_probe_read_kernel(regs_ptr)? };
     let args = syscall_args(&regs, arch);
+    let requested_permissions = permission_mask(generation, arch, syscall_nr);
+    let maintenance_only = maintenance_contains(generation, arch, syscall_nr);
+    let event_flags = if requested_permissions == 0 {
+        0
+    } else {
+        match classify_permission(arch, syscall_nr, args[1], args[2], requested_permissions) {
+            Some(actual) if actual & requested_permissions != 0 => {
+                PERMISSION_VALID | u32::from(actual)
+            }
+            Some(_) if !maintenance_only => return Ok(0),
+            Some(_) => 0,
+            None => {
+                // 动态参数读取失败时绝不猜测权限。保留 flags=0 事件可让同时存在的普通
+                // syscall 规则继续工作，用户态 permission 规则必须把它记录为明确缺口。
+                increment_counter(COUNTER_PERMISSION_CLASSIFICATION_FAILED);
+                0
+            }
+        }
+    };
     let rule_version = RULE_VERSIONS.get(generation).copied().unwrap_or(0);
     if is_exec_syscall(arch, syscall_nr) {
         capture_attempt(
@@ -77,6 +100,7 @@ fn try_sys_enter(context: &RawTracePointContext) -> Result<u32, i32> {
     inflight.syscall_nr = syscall_nr;
     inflight.args = args;
     inflight.rule_version = rule_version;
+    inflight.event_flags = event_flags;
     inflight.dirfd = path_dirfd(arch, syscall_nr, &args);
     inflight.path_flags = 0;
     inflight.path_len = 0;
@@ -115,7 +139,12 @@ fn try_sys_exit(context: &RawTracePointContext) -> Result<u32, i32> {
     };
     // SAFETY: 与入口 scratch 相同，当前 CPU 独占此槽；所有字段在提交前均被覆盖。
     let event = unsafe { &mut *event_pointer };
-    event.header = header(RecordType::Syscall, pid_tgid, inflight.rule_version);
+    event.header = header(
+        RecordType::Syscall,
+        pid_tgid,
+        inflight.rule_version,
+        inflight.event_flags,
+    );
     event.arch = inflight.arch;
     event.syscall_nr = inflight.syscall_nr;
     event.args = inflight.args;
@@ -142,19 +171,101 @@ fn try_sys_exit(context: &RawTracePointContext) -> Result<u32, i32> {
     Ok(0)
 }
 
-fn header(record_type: RecordType, pid_tgid: u64, rule_version: u64) -> KernelEventHeader {
+fn header(
+    record_type: RecordType,
+    pid_tgid: u64,
+    rule_version: u64,
+    flags: u32,
+) -> KernelEventHeader {
     KernelEventHeader {
         schema_version: SCHEMA_VERSION,
         record_type: record_type as u16,
         record_len: core::mem::size_of::<SyscallEvent>() as u32,
         cpu: unsafe { bpf_get_smp_processor_id() },
-        flags: 0,
+        flags,
         ktime_ns: unsafe { bpf_ktime_get_ns() },
         sequence: 0,
         rule_version,
         pid_tgid,
         process_start_ns: 0,
     }
+}
+
+#[inline(never)]
+fn permission_mask(generation: u32, arch: u32, syscall_nr: u32) -> u8 {
+    // verifier 不保证把调用方分支收窄结果传播到独立子程序，因此必须在发生
+    // 512 字节 map value 指针运算的同一函数内再次证明索引上界。
+    if syscall_nr >= 512 {
+        return 0;
+    }
+    let index = (generation & 1) * 512 + syscall_nr;
+    let permission = if arch == AUDIT_ARCH_I386 {
+        PERMISSION_MASKS_B32.get(index)
+    } else {
+        PERMISSION_MASKS_B64.get(index)
+    };
+    permission.copied().unwrap_or(0)
+}
+
+#[inline(never)]
+fn maintenance_contains(generation: u32, arch: u32, syscall_nr: u32) -> bool {
+    if arch == AUDIT_ARCH_I386 {
+        bitmap_contains(&MAINTENANCE_BITMAPS_B32, generation, syscall_nr)
+    } else {
+        bitmap_contains(&MAINTENANCE_BITMAPS_B64, generation, syscall_nr)
+    }
+}
+
+#[inline(always)]
+fn classify_permission(
+    arch: u32,
+    syscall_nr: u32,
+    arg1: u64,
+    arg2: u64,
+    static_permissions: u8,
+) -> Option<u8> {
+    if is_open(arch, syscall_nr) {
+        return open_access_mode(arg1);
+    }
+    if is_openat(arch, syscall_nr) {
+        return open_access_mode(arg2);
+    }
+    if is_openat2(arch, syscall_nr) {
+        if arg2 == 0 {
+            return None;
+        }
+        // SAFETY: open_how 的首字段固定为 u64 flags；只读取 8 字节且通过 user helper，
+        // 不信任用户提供的 size，也不读取结构后续字段，边界适用于 5.15+ ABI。
+        let flags = unsafe { bpf_probe_read_user(arg2 as *const u64) }.ok()?;
+        return open_access_mode(flags);
+    }
+    Some(static_permissions)
+}
+
+#[inline(always)]
+fn open_access_mode(flags: u64) -> Option<u8> {
+    match flags & 0x3 {
+        0 => Some(PERM_READ),
+        1 => Some(PERM_WRITE),
+        2 => Some(PERM_READ | PERM_WRITE),
+        _ => None,
+    }
+}
+
+#[inline(always)]
+fn is_open(arch: u32, syscall_nr: u32) -> bool {
+    (arch == AUDIT_ARCH_I386 && syscall_nr == 5) || (arch == AUDIT_ARCH_X86_64 && syscall_nr == 2)
+}
+
+#[inline(always)]
+fn is_openat(arch: u32, syscall_nr: u32) -> bool {
+    (arch == AUDIT_ARCH_I386 && syscall_nr == 295)
+        || (arch == AUDIT_ARCH_X86_64 && syscall_nr == 257)
+}
+
+#[inline(always)]
+fn is_openat2(_arch: u32, syscall_nr: u32) -> bool {
+    syscall_nr == 437
 }
 
 fn select_arch(generation: u32, syscall_nr: u32, hinted_arch: Option<u32>) -> u32 {
@@ -182,8 +293,11 @@ fn bitmap_contains(
     let Some(bitmap) = map.get(generation) else {
         return false;
     };
-    let word = (syscall_nr / 64) as usize;
-    let bit = syscall_nr % 64;
+    // 子程序边界会丢失调用方的 `<512` 证明；掩码让实际参与 map value
+    // 指针运算的寄存器始终有 9 位上界。
+    let bounded_syscall_nr = syscall_nr & 511;
+    let word = (bounded_syscall_nr / 64) as usize;
+    let bit = bounded_syscall_nr % 64;
     // SAFETY: 调用方在进入位图检查前保证 syscall_nr < 512，因此 word 必在 0..8；
     // 使用 unchecked 是为了禁止 Rust panic 冷路径进入 eBPF 对象，失败会导致程序无法加载。
     let word_value = unsafe { *bitmap.get_unchecked(word) };
@@ -237,18 +351,55 @@ fn read_path(pointer: u64, destination: &mut [u8; MAX_PATH_ARG_BYTES]) -> u16 {
 fn path_argument_indexes(arch: u32, syscall_nr: u32) -> (usize, usize) {
     if arch == AUDIT_ARCH_I386 {
         match syscall_nr {
-            5 | 10 | 12 | 40 | 61 => (0, 6),
-            38 | 39 | 52 => (0, 1),
-            295 | 301 | 358 => (1, 6),
-            302 | 353 => (1, 3),
+            5
+            | 8
+            | 10
+            | 11
+            | 12
+            | 14..=16
+            | 39..=40
+            | 61
+            | 85
+            | 92
+            | 182
+            | 226
+            | 227
+            | 229
+            | 230
+            | 232
+            | 233
+            | 235
+            | 236 => (0, 6),
+            9 | 38 | 83 => (0, 1),
+            295..=301 | 305 | 306 | 358 | 437 | 452 => (1, 6),
+            302 | 303 | 353 => (1, 3),
+            304 => (0, 2),
             _ => (6, 6),
         }
     } else {
         match syscall_nr {
-            2 | 59 | 80 | 87 | 161 | 166 => (0, 6),
-            82 | 83 | 155 | 165 => (0, 1),
-            257 | 263 | 322 | 439 | 442 => (1, 6),
-            264 | 316 | 429 => (1, 3),
+            2
+            | 59
+            | 76
+            | 83..=85
+            | 87
+            | 89
+            | 90
+            | 92
+            | 94
+            | 133
+            | 188
+            | 189
+            | 191
+            | 192
+            | 194
+            | 195
+            | 197
+            | 198 => (0, 6),
+            82 | 86 | 88 => (0, 1),
+            257..=263 | 267 | 268 | 322 | 437 | 452 => (1, 6),
+            264 | 265 | 316 => (1, 3),
+            266 => (0, 2),
             _ => (6, 6),
         }
     }
@@ -257,9 +408,12 @@ fn path_argument_indexes(arch: u32, syscall_nr: u32) -> (usize, usize) {
 #[inline(never)]
 fn path_dirfd(arch: u32, syscall_nr: u32, args: &[u64; 6]) -> i32 {
     let has_dirfd = if arch == AUDIT_ARCH_I386 {
-        matches!(syscall_nr, 295 | 301 | 302 | 353 | 358)
+        matches!(syscall_nr, 295..=306 | 353 | 358 | 437 | 452)
     } else {
-        matches!(syscall_nr, 257 | 263 | 264 | 316 | 322 | 429 | 439 | 442)
+        matches!(
+            syscall_nr,
+            257..=268 | 316 | 322 | 429 | 437 | 439 | 442 | 452
+        )
     };
     if has_dirfd { args[0] as i32 } else { -100 }
 }

@@ -26,6 +26,44 @@ pub struct KernelEventHeader {
     pub process_start_ns: u64,
 }
 
+/// syscall 事件 flags 的 permission 有效标记，位于 bit 8，避免与 Linux audit
+/// 兼容的低四位权限掩码重叠。schema 1 的结构布局不变，只解释原有 `flags` 字段。
+pub const PERMISSION_VALID: u32 = 1 << 8;
+pub const EVENT_PERMISSION_BITS: u32 = PermissionMask::ALL.bits() as u32;
+pub const SYSCALL_EVENT_KNOWN_FLAGS: u32 = PERMISSION_VALID | EVENT_PERMISSION_BITS;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PermissionFlagsError {
+    UnknownBits,
+    PermissionWithoutValid,
+    EmptyValidPermission,
+}
+
+/// 校验并解码 syscall 事件权限。旧 eBPF 对象产生的 `flags=0` 返回 `None`，
+/// 因而仍可服务不带权限条件的普通 syscall 规则；任何保留位都不能被静默忽略。
+pub const fn permission_from_event_flags(
+    flags: u32,
+) -> Result<Option<PermissionMask>, PermissionFlagsError> {
+    if flags & !SYSCALL_EVENT_KNOWN_FLAGS != 0 {
+        return Err(PermissionFlagsError::UnknownBits);
+    }
+    let permission_bits = (flags & EVENT_PERMISSION_BITS) as u8;
+    if flags & PERMISSION_VALID == 0 {
+        return if permission_bits == 0 {
+            Ok(None)
+        } else {
+            Err(PermissionFlagsError::PermissionWithoutValid)
+        };
+    }
+    if permission_bits == 0 {
+        return Err(PermissionFlagsError::EmptyValidPermission);
+    }
+    match PermissionMask::from_bits(permission_bits) {
+        Some(permission) => Ok(Some(permission)),
+        None => Err(PermissionFlagsError::UnknownBits),
+    }
+}
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct SyscallEvent {
@@ -96,3 +134,4 @@ pub struct ProcessEvent {
 pub const PROCESS_EVENT_FORK: u32 = 1;
 pub const PROCESS_EVENT_EXEC: u32 = 2;
 pub const PROCESS_EVENT_EXIT: u32 = 3;
+use crate::permission::PermissionMask;

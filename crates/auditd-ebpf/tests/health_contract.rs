@@ -17,7 +17,7 @@ fn ebpf每cpu计数按字段求和且保持内核不变量() {
         exec_argv_captured_per_cpu: vec![2, 3],
         exec_argv_dropped_per_cpu: vec![1, 0],
         internal_dropped_per_cpu: vec![0, 2],
-        ..KernelCounterSample::default()
+        permission_classification_failed_per_cpu: vec![1, 1],
     };
     let mut counters = HealthCounters::default();
     counters.apply_kernel_sample(&sample).unwrap();
@@ -30,7 +30,8 @@ fn ebpf每cpu计数按字段求和且保持内核不变量() {
     assert_eq!(counters.correlation_missed_total, 1);
     assert_eq!(counters.exec_argv_dropped_total, 1);
     assert_eq!(counters.internal_dropped_total, 2);
-    assert_eq!(counters.kernel_lost_total(), 8);
+    assert_eq!(counters.permission_classification_failed_total, 2);
+    assert_eq!(counters.kernel_lost_total(), 10);
     assert!(counters.kernel_invariant_holds());
 }
 

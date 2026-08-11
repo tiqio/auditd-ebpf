@@ -9,6 +9,7 @@ pub struct HealthCounters {
     pub correlation_missed_total: u64,
     pub exec_argv_dropped_total: u64,
     pub internal_dropped_total: u64,
+    pub permission_classification_failed_total: u64,
     pub events_consumed_total: u64,
     pub events_matched_total: u64,
     pub events_unmatched_total: u64,
@@ -35,6 +36,7 @@ pub struct KernelCounterSample {
     pub exec_argv_captured_per_cpu: Vec<u64>,
     pub exec_argv_dropped_per_cpu: Vec<u64>,
     pub internal_dropped_per_cpu: Vec<u64>,
+    pub permission_classification_failed_per_cpu: Vec<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
@@ -87,6 +89,8 @@ impl HealthCounters {
         let exec_argv_captured_total = checked_sum(&sample.exec_argv_captured_per_cpu)?;
         let exec_argv_dropped_total = checked_sum(&sample.exec_argv_dropped_per_cpu)?;
         let internal_dropped_total = checked_sum(&sample.internal_dropped_per_cpu)?;
+        let permission_classification_failed_total =
+            checked_sum(&sample.permission_classification_failed_per_cpu)?;
         if events_seen_total != events_submitted_total.saturating_add(ring_reserve_failed_total) {
             return Err(CounterError::InvalidKernelSample);
         }
@@ -98,6 +102,7 @@ impl HealthCounters {
         self.exec_argv_captured_total = exec_argv_captured_total;
         self.exec_argv_dropped_total = exec_argv_dropped_total;
         self.internal_dropped_total = internal_dropped_total;
+        self.permission_classification_failed_total = permission_classification_failed_total;
         Ok(())
     }
 
@@ -108,6 +113,7 @@ impl HealthCounters {
             .saturating_add(self.correlation_missed_total)
             .saturating_add(self.exec_argv_dropped_total)
             .saturating_add(self.internal_dropped_total)
+            .saturating_add(self.permission_classification_failed_total)
     }
 }
 

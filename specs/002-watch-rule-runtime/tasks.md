@@ -64,23 +64,23 @@
 
 ### Tests First
 
-- [ ] T018 [P] [US1] 为 schema 1 保持布局、permission bits、bit 8 valid、未知 flags 和旧对象 flags=0 行为添加失败 ABI 测试于 `crates/auditd-ebpf-common/tests/abi_layout.rs`、`crates/auditd-ebpf-common/tests/kernel_records.rs`
+- [X] T018 [P] [US1] 为 schema 1 保持布局、permission bits、bit 8 valid、未知 flags 和旧对象 flags=0 行为添加失败 ABI 测试于 `crates/auditd-ebpf-common/tests/abi_layout.rs`、`crates/auditd-ebpf-common/tests/kernel_records.rs`
 - [ ] T019 [P] [US1] 为 `CandidateEvent` permission 求交、O_RDWR 多权限、watch/syscall perm 一致性和首条规则顺序添加失败测试于 `crates/auditd-ebpf/tests/rule_engine.rs`
 - [ ] T020 [P] [US1] 将现有“FD 更新线程本地”断言改为同 tgid 共享，并添加 fork 快照、exec refresh、dup/close/fd reuse/stale 测试于 `crates/auditd-ebpf/tests/process_cache.rs`
 - [ ] T021 [P] [US1] 为 primary/secondary 独立 dirfd、fd-only 路径、截断、mount epoch 和 namespace lexical 边界添加失败测试于 `crates/auditd-ebpf/tests/path_resolution.rs`
 - [ ] T022 [P] [US1] 为 `perm="r"`、`perm="w"`、`perm="rw"`、失败操作和 operation syscall 名添加失败 golden 于 `crates/auditd-ebpf/tests/event_format_golden.rs`、`tests/golden/events/`
-- [ ] T023 [P] [US1] 创建真实内核 watch 测试骨架，先断言当前实现无法得到 r/w/rw 事件于 `tests/privileged/watch_rules.sh`
+- [X] T023 [P] [US1] 创建真实内核 watch 测试骨架，先断言当前实现无法得到 r/w/rw 事件于 `tests/privileged/watch_rules.sh`
 
 ### Kernel Permission Delivery
 
-- [ ] T024 [US1] 定义 `PERMISSION_VALID`、低四位 permission mask、保留位验证和中文 ABI 文档于 `crates/auditd-ebpf-common/src/event.rs`
-- [ ] T025 [US1] 增加双 generation b64/b32 permission table maps、固定容量和中文 verifier 边界说明于 `crates/auditd-ebpf-ebpf/src/maps.rs`
-- [ ] T026 [US1] 在 inactive generation 原子 stage permission tables 和 maintenance bitmap，并把 map 缺失视为包含 permission 规则时的加载错误于 `crates/auditd-ebpf/src/loader.rs`
-- [ ] T027 [US1] 实现静态权限分类、open/openat O_ACCMODE、creat、openat2 入口 8 字节有界读取、flags 投递和扩展路径参数索引于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`
-- [ ] T028 [US1] 扩展内核 smoke 规则与断言，验证 b64 权限 flags、openat2 读取失败、maintenance 不输出和双 generation 无中间态于 `crates/xtask/src/commands/mod.rs`
-- [ ] T029 [US1] 增加 permission classification failure 的 per-CPU 槽位、求和和内核丢失不变量于 `crates/auditd-ebpf-common/src/counters.rs`、`crates/auditd-ebpf/src/health/counters.rs`
-- [ ] T030 [US1] 运行共享 ABI 测试、`cargo xtask build-ebpf --release` 和 `cargo xtask test-kernel --kernel host`，记录 verifier、flags 和 generation 结果于 `docs/watch-kernel-validation.md`
-- [ ] T031 [US1] 在 T018、T023–T030 通过后创建 `feat: deliver watch permission candidates from ebpf` 里程碑提交，提交范围为共享 ABI、eBPF、loader、xtask 和 `docs/watch-kernel-validation.md`
+- [X] T024 [US1] 定义 `PERMISSION_VALID`、低四位 permission mask、保留位验证和中文 ABI 文档于 `crates/auditd-ebpf-common/src/event.rs`
+- [X] T025 [US1] 增加双 generation b64/b32 permission table maps、固定容量和中文 verifier 边界说明于 `crates/auditd-ebpf-ebpf/src/maps.rs`
+- [X] T026 [US1] 在 inactive generation 原子 stage permission tables 和 maintenance bitmap，并把 map 缺失视为包含 permission 规则时的加载错误于 `crates/auditd-ebpf/src/loader.rs`
+- [X] T027 [US1] 实现静态权限分类、open/openat O_ACCMODE、creat、openat2 入口 8 字节有界读取、flags 投递和扩展路径参数索引于 `crates/auditd-ebpf-ebpf/src/programs/syscall.rs`
+- [X] T028 [US1] 扩展内核 smoke 规则与断言，验证 b64 权限 flags、openat2 读取失败、maintenance 不输出和双 generation 无中间态于 `crates/xtask/src/commands/mod.rs`
+- [X] T029 [US1] 增加 permission classification failure 的 per-CPU 槽位、求和和内核丢失不变量于 `crates/auditd-ebpf-common/src/counters.rs`、`crates/auditd-ebpf/src/health/counters.rs`
+- [X] T030 [US1] 运行共享 ABI 测试、`cargo xtask build-ebpf --release` 和 `cargo xtask test-kernel --kernel host`，记录 verifier、flags 和 generation 结果于 `docs/watch-kernel-validation.md`
+- [X] T031 [US1] 在 T018、T023–T030 通过后创建 `feat: deliver watch permission candidates from ebpf` 里程碑提交，提交范围为共享 ABI、eBPF、loader、xtask 和 `docs/watch-kernel-validation.md`
 
 ### Process FD and Path Semantics
 

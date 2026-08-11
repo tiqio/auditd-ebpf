@@ -4,7 +4,7 @@ use anyhow::Context;
 use auditd_ebpf_common::counters::{
     COUNTER_CORRELATION_MISSED, COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED,
     COUNTER_EXEC_ARGV_CAPTURED, COUNTER_EXEC_ARGV_DROPPED, COUNTER_INFLIGHT_DROPPED,
-    COUNTER_INTERNAL_DROPPED, COUNTER_RINGBUF_DROPPED,
+    COUNTER_INTERNAL_DROPPED, COUNTER_PERMISSION_CLASSIFICATION_FAILED, COUNTER_RINGBUF_DROPPED,
 };
 use auditd_ebpf_rules::KernelFilterPlan;
 use aya::{
@@ -44,6 +44,8 @@ impl LoadedBpf {
         let generation = u32::from(plan.generation);
         let bitmap_b64 = syscall_bitmap(&plan.syscalls_b64);
         let bitmap_b32 = syscall_bitmap(&plan.syscalls_b32);
+        let maintenance_b64 = syscall_bitmap(&plan.maintenance_syscalls_b64);
+        let maintenance_b32 = syscall_bitmap(&plan.maintenance_syscalls_b32);
         let rule_version = plan.rule_version();
         Array::<_, [u64; 8]>::try_from(
             self.inner
@@ -57,6 +59,30 @@ impl LoadedBpf {
                 .context("缺少 SYSCALL_BITMAPS_B32")?,
         )?
         .set(generation, bitmap_b32, 0)?;
+        stage_permission_table(
+            &mut self.inner,
+            "PERMISSION_MASKS_B64",
+            generation,
+            &plan.permission_masks_b64,
+        )?;
+        stage_permission_table(
+            &mut self.inner,
+            "PERMISSION_MASKS_B32",
+            generation,
+            &plan.permission_masks_b32,
+        )?;
+        Array::<_, [u64; 8]>::try_from(
+            self.inner
+                .map_mut("MAINTENANCE_BITMAPS_B64")
+                .context("缺少 MAINTENANCE_BITMAPS_B64")?,
+        )?
+        .set(generation, maintenance_b64, 0)?;
+        Array::<_, [u64; 8]>::try_from(
+            self.inner
+                .map_mut("MAINTENANCE_BITMAPS_B32")
+                .context("缺少 MAINTENANCE_BITMAPS_B32")?,
+        )?
+        .set(generation, maintenance_b32, 0)?;
         Array::<_, u64>::try_from(
             self.inner
                 .map_mut("RULE_VERSIONS")
@@ -126,8 +152,29 @@ impl LoadedBpf {
             exec_argv_captured_per_cpu: read_per_cpu(&counters, COUNTER_EXEC_ARGV_CAPTURED)?,
             exec_argv_dropped_per_cpu: read_per_cpu(&counters, COUNTER_EXEC_ARGV_DROPPED)?,
             internal_dropped_per_cpu: read_per_cpu(&counters, COUNTER_INTERNAL_DROPPED)?,
+            permission_classification_failed_per_cpu: read_per_cpu(
+                &counters,
+                COUNTER_PERMISSION_CLASSIFICATION_FAILED,
+            )?,
         })
     }
+}
+
+fn stage_permission_table(
+    bpf: &mut Ebpf,
+    map_name: &str,
+    generation: u32,
+    permissions: &[u8; 512],
+) -> anyhow::Result<()> {
+    let mut table = Array::<_, u8>::try_from(
+        bpf.map_mut(map_name)
+            .with_context(|| format!("规则包含 permission 覆盖，但对象缺少 {map_name}"))?,
+    )?;
+    let base = generation * 512;
+    for (syscall_nr, permission) in permissions.iter().copied().enumerate() {
+        table.set(base + syscall_nr as u32, permission, 0)?;
+    }
+    Ok(())
 }
 
 fn read_per_cpu<T: std::borrow::Borrow<aya::maps::MapData>>(

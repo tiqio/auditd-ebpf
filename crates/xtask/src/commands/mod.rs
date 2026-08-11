@@ -12,9 +12,10 @@ use auditd_ebpf::{
     loader::LoadedBpf,
 };
 use auditd_ebpf_common::event::{
-    EXEC_ARGV_FLAG_ARGC_TRUNCATED, EXEC_ARGV_FLAG_ARGUMENT_TRUNCATED, PROCESS_EVENT_EXEC,
-    PROCESS_EVENT_EXIT, PROCESS_EVENT_FORK,
+    EXEC_ARGV_FLAG_ARGC_TRUNCATED, EXEC_ARGV_FLAG_ARGUMENT_TRUNCATED, PERMISSION_VALID,
+    PROCESS_EVENT_EXEC, PROCESS_EVENT_EXIT, PROCESS_EVENT_FORK,
 };
+use auditd_ebpf_common::permission::PermissionMask;
 use auditd_ebpf_rules::{ArgvOutput, RuleCompiler, parse_rules};
 use clap::{Parser, Subcommand};
 
@@ -71,9 +72,14 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
     build_ebpf(true)?;
     cargo_build(false)?;
     let object = Path::new("target/bpfel-unknown-none/release/auditd-ebpf-ebpf");
+    let watch_path =
+        std::env::temp_dir().join(format!("auditd-ebpf-kernel-watch-{}", std::process::id()));
     let rules = parse_rules(
         "kernel-smoke.rules",
-        "-a always,exit -F arch=b64 -S execve,openat,82,264,316,87,263,80,161,165,166,308,272,155,429,442 -k kernel-smoke\n",
+        &format!(
+            "-a always,exit -F arch=b64 -S execve,82,264,316,87,263,80,161,165,166,308,272,155,429,442 -k kernel-smoke\n-w {} -p rw -k kernel-watch\n",
+            watch_path.display()
+        ),
     )?;
     let plan = RuleCompiler::compile(
         rules,
@@ -85,6 +91,20 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
     loaded.stage_rules(&plan)?;
     loaded.attach_collection_programs()?;
     let mut ring = loaded.take_ring()?;
+
+    fs::write(&watch_path, b"write")?;
+    let _ = fs::read(&watch_path)?;
+    let _read_write = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&watch_path)?;
+    if Command::new("python3").arg("--version").output().is_ok() {
+        let script = format!(
+            "import ctypes; libc=ctypes.CDLL(None, use_errno=True); path={path:?}.encode(); libc.syscall(437, -100, ctypes.c_char_p(path), ctypes.c_void_p(1), 8)",
+            path = watch_path.to_string_lossy()
+        );
+        Command::new("python3").arg("-c").arg(script).status()?;
+    }
 
     Command::new("/bin/true")
         .status()
@@ -128,6 +148,10 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
     let mut saw_process_exec = false;
     let mut saw_exit = false;
     let mut saw_path = false;
+    let mut saw_permission_read = false;
+    let mut saw_permission_write = false;
+    let mut saw_permission_read_write = false;
+    let mut saw_openat2_read_failure = false;
     while Instant::now() < deadline
         && !(saw_syscall
             && saw_attempt
@@ -138,7 +162,11 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
             && saw_fork
             && saw_process_exec
             && saw_exit
-            && saw_path)
+            && saw_path
+            && saw_permission_read
+            && saw_permission_write
+            && saw_permission_read_write
+            && saw_openat2_read_failure)
     {
         while let Some(item) = ring.next() {
             match decode_owned(&item)? {
@@ -148,6 +176,24 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
                         && event.header.rule_version == expected_version =>
                 {
                     saw_syscall = true;
+                }
+                KernelRecord::Syscall(event)
+                    if event.header.rule_version == expected_version
+                        && syscall_path_matches(&event, &watch_path) =>
+                {
+                    eprintln!(
+                        "watch-smoke syscall={} flags={:#x} path_len={}",
+                        event.syscall_nr, event.header.flags, event.path_len
+                    );
+                    let flags = event.header.flags;
+                    saw_permission_read |=
+                        flags == PERMISSION_VALID | u32::from(PermissionMask::READ.bits());
+                    saw_permission_write |=
+                        flags == PERMISSION_VALID | u32::from(PermissionMask::WRITE.bits());
+                    saw_permission_read_write |= flags
+                        == PERMISSION_VALID
+                            | u32::from((PermissionMask::READ | PermissionMask::WRITE).bits());
+                    saw_openat2_read_failure |= event.syscall_nr == 437 && flags == 0;
                 }
                 KernelRecord::Syscall(event)
                     if event.header.rule_version == expected_version
@@ -198,17 +244,35 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         && saw_fork
         && saw_process_exec
         && saw_exit
-        && saw_path)
+        && saw_path
+        && saw_permission_read
+        && saw_permission_write
+        && saw_permission_read_write
+        && saw_openat2_read_failure)
     {
         bail!(
-            "内核采集不完整 syscall={saw_syscall} attempt={saw_attempt} result={saw_result} failed={saw_failed_result} argc_truncated={saw_argc_truncation} arg_truncated={saw_argument_truncation} fork={saw_fork} process_exec={saw_process_exec} exit={saw_exit} path={saw_path}"
+            "内核采集不完整 syscall={saw_syscall} attempt={saw_attempt} result={saw_result} failed={saw_failed_result} argc_truncated={saw_argc_truncation} arg_truncated={saw_argument_truncation} fork={saw_fork} process_exec={saw_process_exec} exit={saw_exit} path={saw_path} perm_r={saw_permission_read} perm_w={saw_permission_write} perm_rw={saw_permission_read_write} openat2_failed={saw_openat2_read_failure}"
         );
     }
+
+    let counters = loaded.read_kernel_counters()?;
+    anyhow::ensure!(
+        counters
+            .permission_classification_failed_per_cpu
+            .iter()
+            .copied()
+            .sum::<u64>()
+            >= 1,
+        "openat2 用户指针读取失败未增加 permission classification failure"
+    );
 
     Command::new("/bin/true").status()?;
     let reloaded_rules = parse_rules(
         "kernel-reloaded.rules",
-        "-a always,exit -F arch=b64 -S execve,openat,82,264,316,87,263,80,161,165,166,308,272,155,429,442 -k kernel-reloaded\n",
+        &format!(
+            "-a always,exit -F arch=b64 -S execve,82,264,316,87,263,80,161,165,166,308,272,155,429,442 -k kernel-reloaded\n-w {} -p rw -k kernel-watch-reloaded\n",
+            watch_path.display()
+        ),
     )?;
     let reloaded_plan = RuleCompiler::compile(
         reloaded_rules,
@@ -216,9 +280,10 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         BTreeMap::from([("kernel-reloaded".to_owned(), ArgvOutput::Disabled)]),
     )?;
     let reloaded_version = u64::from_le_bytes(reloaded_plan.version_hash[..8].try_into().unwrap());
-    let worker = std::thread::spawn(|| {
+    let worker_path = watch_path.clone();
+    let worker = std::thread::spawn(move || {
         for _ in 0..16 {
-            let _ = Command::new("/bin/true").status();
+            let _ = fs::read(&worker_path);
         }
     });
     std::thread::sleep(Duration::from_millis(5));
@@ -227,7 +292,7 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         parse_rules("invalid.rules", "-a always,exit -S execve").is_err(),
         "无效候选规则必须在 staging 前失败"
     );
-    Command::new("/bin/true").status()?;
+    let _ = fs::read(&watch_path)?;
     worker
         .join()
         .map_err(|_| anyhow::anyhow!("并发 exec worker panic"))?;
@@ -238,7 +303,8 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
     while Instant::now() < reload_deadline && !(saw_old_version && saw_new_version) {
         while let Some(item) = ring.next() {
             if let KernelRecord::Syscall(event) = decode_owned(&item)?
-                && event.syscall_nr == 59
+                && syscall_path_matches(&event, &watch_path)
+                && event.header.flags & PERMISSION_VALID != 0
             {
                 match event.header.rule_version {
                     version if version == expected_version => saw_old_version = true,
@@ -257,6 +323,7 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
         "内核采集 PASS kernel={} rule_version={expected_version} reloaded_version={reloaded_version}",
         release.trim(),
     );
+    fs::remove_file(&watch_path)?;
     run(
         Command::new("tests/integration/logging_end_to_end.sh").args([
             "target/debug/auditd-ebpf",
@@ -270,6 +337,13 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
     ]))
     .context("US1 运行时规则重载门禁失败")?;
     Ok(())
+}
+
+fn syscall_path_matches(event: &auditd_ebpf_common::event::SyscallEvent, expected: &Path) -> bool {
+    let length = usize::from(event.path_len).min(event.path.len());
+    let bytes = &event.path[..length];
+    let bytes = bytes.strip_suffix(&[0]).unwrap_or(bytes);
+    bytes == expected.as_os_str().as_encoded_bytes()
 }
 
 fn cargo_build(release: bool) -> anyhow::Result<()> {

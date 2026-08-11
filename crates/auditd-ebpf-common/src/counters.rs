@@ -11,4 +11,7 @@ pub const COUNTER_EXEC_ARGV_DROPPED: u32 = 4;
 pub const COUNTER_EVENTS_SEEN: u32 = 5;
 pub const COUNTER_EVENTS_SUBMITTED: u32 = 6;
 pub const COUNTER_INTERNAL_DROPPED: u32 = 7;
-pub const EVENT_COUNTER_SLOTS: u32 = 8;
+/// openat2 等动态参数无法安全读取时递增。它不等同于 ring buffer 丢失，
+/// 但会使 permission 规则覆盖不完整，因此必须进入内核缺口总量。
+pub const COUNTER_PERMISSION_CLASSIFICATION_FAILED: u32 = 8;
+pub const EVENT_COUNTER_SLOTS: u32 = 9;
