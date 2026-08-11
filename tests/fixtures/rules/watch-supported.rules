@@ -1,0 +1,15 @@
+# legacy watch 权限覆盖语料；路径仅使用隔离测试目录。
+-w /tmp/auditd-ebpf-watch/read -p r -k watch-read
+-w /tmp/auditd-ebpf-watch/write -p w -k watch-write
+-w /tmp/auditd-ebpf-watch/read-write -p rw -k watch-read-write
+-w /tmp/auditd-ebpf-watch/execute -p x -k watch-execute
+-w /tmp/auditd-ebpf-watch/attribute -p a -k watch-attribute
+-w /tmp/auditd-ebpf-watch/all -p rwxa -k watch-all
+
+# syscall 形式必须和 watch 使用同一 permission 分类表。
+-a always,exit -F arch=b64 -S openat -F path=/tmp/auditd-ebpf-watch/read-write -F perm=rw -k syscall-rw
+-a always,exit -F arch=b32 -S openat -F path=/tmp/auditd-ebpf-watch/compat -F perm=rw -k syscall-rw-compat
+
+# 双路径操作由特权测试触发，规则仍按目标路径声明。
+-w /tmp/auditd-ebpf-watch/rename-source -p w -k watch-rename-source
+-w /tmp/auditd-ebpf-watch/rename-target -p w -k watch-rename-target

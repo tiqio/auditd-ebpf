@@ -1,0 +1,10 @@
+# 每个非注释行都必须被独立拒绝并给出稳定原因。
+-w /tmp/auditd-ebpf-watch/missing-perm -k missing-perm
+-w /tmp/auditd-ebpf-watch/empty-perm -p "" -k empty-perm
+-w /tmp/auditd-ebpf-watch/duplicate-perm -p rr -k duplicate-perm
+-w /tmp/auditd-ebpf-watch/invalid-perm -p rq -k invalid-perm
+-w relative/path -p rw -k relative-path
+-w /tmp/auditd-ebpf-watch/* -p rw -k wildcard-path
+-w /tmp/auditd-ebpf-watch/../escape -p rw -k parent-component
+-w /tmp/auditd-ebpf-watch/no-key -p rw
+-w /tmp/auditd-ebpf-watch/two-keys -p rw -k first -F key=second

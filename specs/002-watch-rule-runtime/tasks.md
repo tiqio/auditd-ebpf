@@ -20,12 +20,12 @@
 
 **Purpose**: 固定当前 watch 规则“可解析但运行覆盖为空”的基线，并准备后续 TDD 语料。
 
-- [ ] T001 记录当前 `-w /tmp/ddtest -p rw -k ddtest` 的规范化空覆盖、运行时不命中根因、当前测试命令和预期修复边界于 `docs/watch-baseline.md`
-- [ ] T002 [P] 创建覆盖 `r`、`w`、`rw`、`x`、`a`、失败操作、双路径和 b32/b64 的受支持规则语料于 `tests/fixtures/rules/watch-supported.rules`
-- [ ] T003 [P] 创建缺少 `-p`、空权限、重复权限、非法字符、相对路径、通配符和缺失 key 的拒绝语料于 `tests/fixtures/rules/watch-rejected.rules`
-- [ ] T004 [P] 说明 watch fixture 的预期覆盖、错误码和不得包含敏感采集数据的约束于 `tests/fixtures/rules/README.md`
-- [ ] T005 运行现有 `check-rules`、规则测试、用户态测试和 `git diff --check`，将基线命令与结果更新到 `docs/watch-baseline.md`
-- [ ] T006 在 T001–T005 门禁通过后创建 `docs: record watch runtime baseline` 里程碑提交，提交范围为 `docs/watch-baseline.md` 和 `tests/fixtures/rules/`
+- [X] T001 记录当前 `-w /tmp/ddtest -p rw -k ddtest` 的规范化空覆盖、运行时不命中根因、当前测试命令和预期修复边界于 `docs/watch-baseline.md`
+- [X] T002 [P] 创建覆盖 `r`、`w`、`rw`、`x`、`a`、失败操作、双路径和 b32/b64 的受支持规则语料于 `tests/fixtures/rules/watch-supported.rules`
+- [X] T003 [P] 创建缺少 `-p`、空权限、重复权限、非法字符、相对路径、通配符和缺失 key 的拒绝语料于 `tests/fixtures/rules/watch-rejected.rules`
+- [X] T004 [P] 说明 watch fixture 的预期覆盖、错误码和不得包含敏感采集数据的约束于 `tests/fixtures/rules/README.md`
+- [X] T005 运行现有 `check-rules`、规则测试、用户态测试和 `git diff --check`，将基线命令与结果更新到 `docs/watch-baseline.md`
+- [X] T006 在 T001–T005 门禁通过后创建 `docs: record watch runtime baseline` 里程碑提交，提交范围为 `docs/watch-baseline.md` 和 `tests/fixtures/rules/`
 
 ---
 
