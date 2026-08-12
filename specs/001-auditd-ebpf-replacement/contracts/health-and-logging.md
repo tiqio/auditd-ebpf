@@ -84,7 +84,9 @@ LimitMEMLOCK=infinity
   effective/permitted/inheritable 集合，并保持 `NoNewPrivileges`，运行期不得保留 capability。
 - `ProtectSystem=strict` 下只读规则和配置，允许写入的路径仅限运行目录、
   `/var/lib/auditd-ebpf` 生命周期目录和可选基准输出目录。
-- 发行包不得同时自动启动 auditd 与 auditd-ebpf。
+- 发行包允许 auditd 与 auditd-ebpf 在迁移观察期同时运行，不得通过 systemd `Conflicts=`
+  隐式停止传统 auditd；两套代理必须使用独立规则目录和可区分的日志来源。性能对比、丢失率
+  测量和单代理正确性验收仍必须只运行被测审计代理。
 
 ## rsyslog Contract
 

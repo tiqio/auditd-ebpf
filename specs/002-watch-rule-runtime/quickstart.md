@@ -1,7 +1,7 @@
 # Quickstart: 验证 `-w /tmp/ddtest -p rw -k ddtest`
 
-本指南用于功能实现后的隔离主机验收。命令会加载 eBPF 并与传统 auditd 冲突，不得在生产审计
-主机执行。
+本指南用于功能实现后的隔离主机验收。auditd-ebpf 技术上可以与传统 auditd 共存，但两者同时
+运行会重复采集并污染单代理正确性结论，因此本验收仍要求在非生产测试机单独运行 auditd-ebpf。
 
 ## 1. Preconditions
 
@@ -87,7 +87,8 @@ kind=Watch ... syscalls= ... perm=rw ...
 
 ## 5. Run in Foreground
 
-先在隔离测试机停止传统 auditd，避免两个审计代理同时工作：
+默认 systemd 部署允许与传统 auditd 共存；本节为了验证 auditd-ebpf 自身的正确性，建议在隔离
+测试机临时停止传统 auditd，避免重复记录影响判断：
 
 ```bash
 sudo systemctl stop auditd 2>/dev/null || sudo service auditd stop 2>/dev/null || true

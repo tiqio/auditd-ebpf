@@ -7,8 +7,9 @@
 stderr 都进入 journal。审计事件只写 stdout；status、diag 写 stderr，便于 rsyslog 独立分流。
 
 默认 systemd 单元从 `/etc/auditd-ebpf/rules.d` 读取本服务规则；不要与传统 auditd 的
-`/etc/audit/rules.d` 混用。单元声明 `Conflicts=auditd.service`，正式启用时由 systemd 停止
-传统 auditd，避免两个审计代理同时运行造成运维判断歧义。
+`/etc/audit/rules.d` 混用。单元不再声明 `Conflicts=auditd.service`，允许迁移观察期同时运行
+传统 auditd 与 auditd-ebpf；运维方必须按日志来源区分两套记录，并接受同一操作可能重复记录。
+进行性能对比、丢失率测量或单代理正确性验收时，必须只运行被测审计代理，避免互相污染结果。
 
 ```console
 systemctl enable --now auditd-ebpf.service

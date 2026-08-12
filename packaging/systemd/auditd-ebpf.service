@@ -3,7 +3,6 @@ Description=Rust/Aya eBPF audit service
 Documentation=man:auditd-ebpf(8)
 After=local-fs.target systemd-journald.service
 Wants=systemd-journald.service
-Conflicts=auditd.service
 
 [Service]
 Type=simple

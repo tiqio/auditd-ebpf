@@ -81,7 +81,8 @@ sudo target/release/auditd-ebpf print-capabilities
 
 ## 5. Run Foreground Validation
 
-传统 auditd 必须在隔离测试机上停止，避免重复事件：
+默认 systemd 部署允许两者共存；本项单代理验收仍在隔离测试机停止传统 auditd，避免重复事件
+污染正确性和丢失率判断：
 
 ```bash
 sudo systemctl stop auditd || sudo service auditd stop
