@@ -15,6 +15,13 @@ cargo xtask build-ebpf --release
 cargo test --workspace --exclude auditd-ebpf-ebpf
 ```
 
+## 架构文档
+
+- [eBPF 与 Aya 实现架构](docs/ebpf-aya-architecture.md)：内核采集链路、maps、RingBuf、规则
+  generation、FD 生命周期，以及 Aya 与 C/libbpf 的详细对比和可视化图。
+- [运维指南](docs/operations.md)：systemd、journal、rsyslog、健康状态与故障处理。
+- [配置说明](docs/configuration.md)：配置层级、队列和 argv 输出策略。
+
 ## Watch 规则
 
 支持 legacy 精确路径规则，例如：
@@ -37,8 +44,8 @@ table、维护集合、路径候选、rule version 和用户态 RuleEngine，最
 
 ## 特权测试
 
-特权测试会加载 eBPF、改变 mount namespace、停止 auditd 并验证 systemd/rsyslog。只能在隔离测试
-主机或专用虚拟机执行，运行前必须确认没有生产审计与敏感业务。
+特权测试会加载 eBPF、改变 mount namespace，并在部分单代理验收中临时停止 auditd，同时验证
+systemd/rsyslog。只能在隔离测试主机或专用虚拟机执行，运行前必须确认没有生产审计与敏感业务。
 
 ## 安全警告
 

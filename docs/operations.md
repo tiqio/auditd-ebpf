@@ -1,5 +1,8 @@
 # auditd-ebpf 运维指南
 
+内核采集程序、共享 ABI、Aya 加载流程和 C/libbpf 对比见
+[eBPF 与 Aya 实现架构](ebpf-aya-architecture.md)。
+
 ## systemd 与 journal
 
 安装 `packaging/systemd/auditd-ebpf.service`，创建 `auditd-ebpf-auditors` 组，并仅把获准审计
