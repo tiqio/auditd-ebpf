@@ -61,3 +61,7 @@ type=AUDITD_EBPF ... key="ddtest" syscall="openat" operation="openat" path="/tmp
    reason，不包含 argv；
 3. 在 10 秒内进入 degraded；
 4. 保持 stdout 审计事件中没有 `perm=""` 或 `path=""` 的假匹配。
+
+## Structured Watch Diagnostic
+
+watch gap 诊断固定包含 `reason`、`stage`、`rule_version`、`pid`、`tid`、`syscall`；未知规则版本输出 `?`。诊断构造接口不接受 argv，字段顺序由 golden 测试固定。

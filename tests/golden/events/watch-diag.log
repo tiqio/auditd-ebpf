@@ -1,0 +1,1 @@
+type=AUDITD_EBPF_DIAG host="node-a" machine_id=0123456789abcdef0123456789abcdef level=error code=watch_gap component=collector reason=fd_association_stale stage=fd_resolution rule_version=7 pid=1200 tid=1201 syscall="ftruncate" message="watch candidate rejected"

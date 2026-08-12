@@ -161,7 +161,7 @@
 - [X] T068 [US3] 强制至少 5 个有效样本、CPU/RSS/吞吐/p95/丢失字段和正确性失败即 invalid 的 watch 报告于 `crates/auditd-ebpf-bench/src/report.rs`、`crates/auditd-ebpf-bench/src/statistics.rs`、`crates/auditd-ebpf-bench/src/metrics.rs`
 - [X] T069 [US3] 执行 `quickstart.md` 第 11–13 节、故障注入和隔离主机 watch 基准，将脱敏结论与原始结果位置记录于 `docs/watch-us3-validation.md`、`docs/watch-performance-validation.md`
 - [X] T070 [US3] 运行 fmt、严格 Clippy、用户态/bench 测试、eBPF build、host kernel 和 failure injection 门禁，并更新结果于 `docs/watch-us3-validation.md`
-- [ ] T071 [US3] 在 T057–T070 全部通过后创建 `feat: expose watch gaps and performance evidence` 里程碑提交，提交范围为 `crates/auditd-ebpf/src/health/`、`crates/auditd-ebpf/src/output/`、`crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf-bench/`、`tests/failure-injection/`、`docs/watch-us3-validation.md`、`docs/watch-performance-validation.md`
+- [X] T071 [US3] 在 T057–T070 全部通过后创建 `feat: expose watch gaps and performance evidence` 里程碑提交，提交范围为 `crates/auditd-ebpf/src/health/`、`crates/auditd-ebpf/src/output/`、`crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf-bench/`、`tests/failure-injection/`、`docs/watch-us3-validation.md`、`docs/watch-performance-validation.md`
 
 **Checkpoint**: 没有静默权限或路径缺口，性能声明具备正确性前置和可复现证据。
 
@@ -171,13 +171,13 @@
 
 **Purpose**: 完成跨故事文档、安全审查、内核矩阵和最终可追溯性。
 
-- [ ] T072 完整执行 `specs/002-watch-rule-runtime/quickstart.md` 并记录每步命令、结果、耗时、SKIP 理由和偏差于 `docs/watch-quickstart-validation.md`
-- [ ] T073 [P] 审核 openat2 用户指针读取、map/栈容量、syscall `<512`、unchecked 索引、FD 缓存和 flags 兼容边界于 `docs/watch-security-review.md`
-- [ ] T074 [P] 建立 FR-001–FR-016、SR-001–SR-005、SC-001–SC-008 到任务、测试和证据的最终追踪矩阵于 `docs/watch-requirements-traceability.md`
-- [ ] T075 [P] 审核新增公共 API、复杂算法、eBPF/unsafe、b32/b64 和 namespace 处理的中文注释与契约同步于 `crates/`、`specs/002-watch-rule-runtime/contracts/`
-- [ ] T076 [P] 在可用的 5.15/6.1/6.6/6.12 x86_64 环境验证 b64/b32 watch、reload、gap、计数和清理，并记录于 `tests/vm/results/watch-kernel-matrix.md`
-- [ ] T077 运行 workspace fmt、严格 Clippy、全量测试、eBPF release build、host 特权套件、watch quickstart、安全审查和矩阵门禁，将发布判定记录于 `docs/watch-release-validation.md`
-- [ ] T078 在 T072–T077 全部通过后创建 `feat: complete end-to-end watch rule support` 发布里程碑提交并推送 `origin/main`，提交范围为 `crates/`、`tests/`、`docs/watch-*.md`、`specs/002-watch-rule-runtime/`、`benchmarks/reports/watch/`
+- [X] T072 完整执行 `specs/002-watch-rule-runtime/quickstart.md` 并记录每步命令、结果、耗时、SKIP 理由和偏差于 `docs/watch-quickstart-validation.md`
+- [X] T073 [P] 审核 openat2 用户指针读取、map/栈容量、syscall `<512`、unchecked 索引、FD 缓存和 flags 兼容边界于 `docs/watch-security-review.md`
+- [X] T074 [P] 建立 FR-001–FR-016、SR-001–SR-005、SC-001–SC-008 到任务、测试和证据的最终追踪矩阵于 `docs/watch-requirements-traceability.md`
+- [X] T075 [P] 审核新增公共 API、复杂算法、eBPF/unsafe、b32/b64 和 namespace 处理的中文注释与契约同步于 `crates/`、`specs/002-watch-rule-runtime/contracts/`
+- [X] T076 [P] 在可用的 5.15/6.1/6.6/6.12 x86_64 环境验证 b64/b32 watch、reload、gap、计数和清理，并记录于 `tests/vm/results/watch-kernel-matrix.md`
+- [X] T077 运行 workspace fmt、严格 Clippy、全量测试、eBPF release build、host 特权套件、watch quickstart、安全审查和矩阵门禁，将发布判定记录于 `docs/watch-release-validation.md`
+- [X] T078 在 T072–T077 全部通过后创建 `feat: complete end-to-end watch rule support` 发布里程碑提交并推送 `origin/main`，提交范围为 `crates/`、`tests/`、`docs/watch-*.md`、`specs/002-watch-rule-runtime/`、`benchmarks/reports/watch/`
 
 ---
 
