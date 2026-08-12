@@ -17,9 +17,22 @@
 status、diag 或 gap。按规则 key 的覆盖优先于全局默认；存在覆盖时，该 key 必须唯一对应一条
 exec 规则，冲突会使候选规则集整体失败。
 
+## Watch 规则与覆盖
+
+精确 watch 使用 `-w ABSOLUTE_PATH -p rwxa -k KEY`。`-p` 必须且只能出现一次，内容为非空、
+无重复字符的 `rwxa` 子集；路径不得为相对路径、通配符，也不得包含 `.` 或 `..` 分量。
+
+```console
+auditd-ebpf check-rules --rules-dir /etc/audit/rules.d --print-normalized
+```
+
+watch 输出包含非空 `syscalls`、`coverage_version=1`、`coverage_b64` 和 `coverage_b32`。覆盖字段
+按 `r,w,x,a` 固定顺序输出，参与稳定规则版本。`E_PERMISSION`、`E_PERMISSION_COVERAGE`、
+`E_SYSCALL_RANGE`、`E_WATCH_PATH` 或 `E_KEY` 会使整套规则返回退出码 3，不输出可启动版本。
+
 ## 容量
 
-- RingBuf 默认 16 MiB，必须是 1–256 MiB 范围内的二次幂。
+- eBPF RingBuf 当前固定 256 MiB；map 创建后不能在线扩容，容量不足通过单调丢失计数暴露。
 - 用户态队列默认 64 MiB，连续三个窗口超过 80% 后倍增，最大 512 MiB。
 - 低于 25% 持续十分钟后逐级缩容，但不低于初始容量。
 - 达到硬上限采用 drop-new，不阻塞被审计业务；丢失计数并进入 degraded。
@@ -31,7 +44,7 @@ exec 规则，冲突会使候选规则集整体失败。
 临时文件、文件 `fsync`、原子 rename 和父目录 `fsync`。
 
 启动顺序固定为：读取 eBPF 对象但不 attach → durable dirty → attach → RingBuf 消费。停止顺序
-固定为：停止接收 → 排空或超时 → final status → drop RingBuf、links 和 maps → durable clean。
+固定为：detach 内核采集入口 → 排空或超时 → final status → drop RingBuf、links 和 maps → durable clean。
 SIGKILL、崩溃或断电会保留 dirty；下次启动在十秒内输出
 `reason=unclean_shutdown count=?`，不能据此伪造精确丢失数量。
 
@@ -52,4 +65,3 @@ auditd-ebpf run --deployment-mode production \
 使用 `auditd-ebpf print-policy-digest --value-only` 生成待审批摘要，使用
 `auditd-ebpf check-production --risk-acceptance-file PATH` 执行与 production `run` 相同门禁。
 失败统一返回退出码 9，且在 durable dirty 和 eBPF attach 前终止。
-

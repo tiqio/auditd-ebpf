@@ -1,4 +1,4 @@
-use auditd_ebpf_rules::parse_rules;
+use auditd_ebpf_rules::{RuleCompiler, parse_rules};
 
 #[test]
 fn rejects_missing_empty_duplicate_and_mixed_key_forms() {
@@ -27,4 +27,32 @@ fn rejects_unsupported_fields_and_parent_components() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn watch_permission_and_path_diagnostics_are_precise() {
+    for (input, code) in [
+        ("-w /tmp/ddtest -k x", "E_PERMISSION"),
+        ("-w /tmp/ddtest -p '' -k x", "E_PERMISSION"),
+        ("-w /tmp/ddtest -p rr -k x", "E_PERMISSION"),
+        ("-w /tmp/ddtest -p rz -k x", "E_PERMISSION"),
+        ("-w relative -p r -k x", "E_WATCH_PATH"),
+        ("-w /tmp/../etc -p r -k x", "E_WATCH_PATH"),
+    ] {
+        let errors = parse_rules("watch.rules", input).unwrap_err();
+        assert_eq!(errors.0.len(), 1, "input={input}");
+        assert_eq!(errors.0[0].code, code, "input={input}");
+        assert_eq!(errors.0[0].file, "watch.rules");
+        assert_eq!(errors.0[0].line, 1);
+    }
+}
+
+#[test]
+fn watch_requested_permissions_must_have_non_empty_coverage() {
+    let mut rule = parse_rules("watch.rules", "-w /tmp/ddtest -p r -k x")
+        .unwrap()
+        .remove(0);
+    rule.permissions.clear();
+    let errors = RuleCompiler::compile(vec![rule], 0, Default::default()).unwrap_err();
+    assert_eq!(errors.0[0].code, "E_PERMISSION_COVERAGE");
 }

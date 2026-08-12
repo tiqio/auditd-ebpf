@@ -61,6 +61,7 @@ fn parse_line(
         argv_output: Default::default(),
     };
     let mut key_count = 0;
+    let mut permission_count = 0;
     let mut cursor = if kind == RuleKind::Syscall { 2 } else { 1 };
     if kind == RuleKind::Watch {
         rule.path = Some(validate_path(
@@ -87,6 +88,7 @@ fn parse_line(
                 rule.key = value.to_string();
             }
             "-p" if kind == RuleKind::Watch => {
+                permission_count += 1;
                 rule.permissions = parse_permissions(file, line_number, value)?
             }
             "-F" => parse_field(file, line_number, value, &mut rule, &mut key_count)?,
@@ -115,6 +117,14 @@ fn parse_line(
             line_number,
             "E_SYSCALL",
             "syscall 规则至少需要一个 -S",
+        ));
+    }
+    if kind == RuleKind::Watch && permission_count != 1 {
+        return Err(RuleErrors::one(
+            file,
+            line_number,
+            "E_PERMISSION",
+            "watch 规则必须且只能包含一个非空 -p rwxa",
         ));
     }
     Ok(rule)
@@ -186,25 +196,35 @@ fn parse_field(
 
 fn validate_path(file: &str, line: usize, value: Option<&str>) -> Result<String, RuleErrors> {
     let value = value.ok_or_else(|| RuleErrors::one(file, line, "E_PATH", "缺少路径"))?;
-    if !value.starts_with('/') || value.split('/').any(|part| part == "." || part == "..") {
+    if !value.starts_with('/')
+        || value.contains(['*', '?', '[', ']'])
+        || value.split('/').any(|part| part == "." || part == "..")
+    {
         return Err(RuleErrors::one(
             file,
             line,
-            "E_PATH",
-            "路径必须绝对且不得包含 . 或 ..",
+            "E_WATCH_PATH",
+            "watch 路径必须为绝对词法路径，且不得包含通配符、. 或 ..",
         ));
     }
     Ok(value.to_string())
 }
 
 fn parse_permissions(file: &str, line: usize, value: &str) -> Result<BTreeSet<char>, RuleErrors> {
+    let value = value.trim_matches('"').trim_matches('\'');
     let permissions: BTreeSet<_> = value.chars().collect();
     if permissions.is_empty()
+        || permissions.len() != value.chars().count()
         || permissions
             .iter()
             .any(|value| !matches!(value, 'r' | 'w' | 'x' | 'a'))
     {
-        return Err(RuleErrors::one(file, line, "E_PERM", "perm 只允许 r/w/x/a"));
+        return Err(RuleErrors::one(
+            file,
+            line,
+            "E_PERMISSION",
+            "-p 必须为非空、无重复字符的 rwxa 子集",
+        ));
     }
     Ok(permissions)
 }

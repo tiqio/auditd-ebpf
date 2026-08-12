@@ -39,6 +39,14 @@ impl RuleCompiler {
         for rule in &rules {
             compile_explicit_syscalls(rule, &mut b64, &mut b32)?;
             let requested = permission_mask(rule)?;
+            if rule.kind == RuleKind::Watch && requested.is_empty() {
+                return Err(RuleErrors::one(
+                    "<compiled>",
+                    0,
+                    "E_PERMISSION_COVERAGE",
+                    "watch 请求权限为空，无法生成可执行覆盖",
+                ));
+            }
             if !requested.is_empty() {
                 let arches: &[Arch] = if rule.kind == RuleKind::Watch {
                     &[Arch::B64, Arch::B32]

@@ -55,7 +55,9 @@ pub fn execute() -> i32 {
         ) {
             Ok(()) => 0,
             Err(error) => {
-                eprintln!("type=AUDITD_EBPF_DIAG level=error code=rule_invalid message={error:?}");
+                eprintln!(
+                    "type=AUDITD_EBPF_DIAG level=error code=rule_invalid message=\"{error}\""
+                );
                 3
             }
         },

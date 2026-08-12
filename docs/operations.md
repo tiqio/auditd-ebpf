@@ -17,6 +17,11 @@ kill -USR1 "$(systemctl show -p MainPID --value auditd-ebpf.service)"
 排空超时返回 8，永久 stdout 失败返回 7。状态每十秒输出；任意 ring、queue、path 或异常关闭
 增量应立即告警，连续五分钟无新缺口才从 degraded 恢复 healthy，累计计数不清零。
 
+规则 reload 使用双 generation：先写完 syscall bitmap、permission tables、maintenance bitmap、
+路径候选摘要和 rule version，再安装用户态 RuleEngine，最后切换 `ACTIVE_GENERATION`。日志中的
+`reload_applied` 包含 generation/rule_version；`reload_rejected` 包含文件、行号和稳定错误码。
+拒绝后必须继续观察到旧 key 与旧 rule version，禁止人工重启掩盖原子性问题。
+
 ## rsyslog
 
 安装 `packaging/rsyslog/60-auditd-ebpf.conf`，替换示例 CA、客户端证书、服务端 DNS 身份和目的
@@ -32,14 +37,17 @@ rsyslog 使用 `%msg%` 加 LF 保存已经完成 argv 策略的源行，不解�
 
 ```console
 auditd-ebpf print-capabilities
-auditd-ebpf check-rules --rules-file /etc/audit/rules.d/auditd-ebpf.rules
+auditd-ebpf check-rules --rules-file /etc/audit/rules.d/auditd-ebpf.rules --print-normalized
 auditd-ebpf check-production --risk-acceptance-file /etc/auditd-ebpf/risk-acceptance.toml
 systemd-analyze verify /usr/lib/systemd/system/auditd-ebpf.service
 rsyslogd -N1
 ```
 
+包含 permission 条件的规则要求 eBPF 对象提供双 ABI permission/maintenance maps。旧对象
+`flags=0` 仅兼容不依赖权限的普通 syscall 事件；permission watch 会形成明确缺口。任何未知
+syscall header flags 都会在解码阶段拒绝，不能静默解释为 `perm=?`。
+
 发现历史 dirty 时，先保存 gap、状态和上次 lifecycle 文件，再调查宿主机重启、OOM、SIGKILL、
 stdout/rsyslog 故障。`count=?` 只表示异常清理期间数量未知，不能解释为零。完整 argv 可能包含
 口令、token 和个人数据；越权读取、日志错误转发或保留期失控必须按风险记录中的事件响应流程
 处置并轮换相关凭据。
-

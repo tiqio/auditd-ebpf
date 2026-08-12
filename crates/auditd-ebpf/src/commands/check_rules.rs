@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, bail};
 use auditd_ebpf_rules::{
-    RuleCompiler, normalize::normalized_line, parse_rules, source::sorted_rule_files,
+    RuleCompiler, normalize::normalized_plan_line, parse_rules, source::sorted_rule_files,
 };
 
 pub fn run(
@@ -27,7 +27,7 @@ pub fn run(
         RuleCompiler::compile(all_rules, 0, Default::default()).map_err(anyhow::Error::new)?;
     if print_normalized {
         for rule in &plan.rules {
-            println!("{}", normalized_line(rule));
+            println!("{}", normalized_plan_line(&plan, rule));
         }
     } else {
         println!(

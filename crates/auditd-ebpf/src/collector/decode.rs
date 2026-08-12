@@ -2,7 +2,10 @@ use std::mem::size_of;
 
 use auditd_ebpf_common::{
     SCHEMA_VERSION,
-    event::{ExecAttempt, ExecResult, ProcessEvent, RecordType, SyscallEvent},
+    event::{
+        ExecAttempt, ExecResult, PermissionFlagsError, ProcessEvent, RecordType, SyscallEvent,
+        permission_from_event_flags,
+    },
 };
 use thiserror::Error;
 
@@ -23,6 +26,8 @@ pub enum DecodeError {
     InvalidLength { declared: usize, actual: usize },
     #[error("未知记录类型 {0}")]
     UnknownRecordType(u16),
+    #[error("syscall 权限 flags 不兼容: {0:?}")]
+    InvalidPermissionFlags(PermissionFlagsError),
 }
 
 #[derive(Clone)]
@@ -61,7 +66,10 @@ pub fn decode_owned(bytes: &[u8]) -> Result<KernelRecord, DecodeError> {
     let decoded = decode_record(bytes)?;
     match decoded.record_type {
         value if value == RecordType::Syscall as u16 => {
-            copy_record(bytes).map(Box::new).map(KernelRecord::Syscall)
+            let event: SyscallEvent = copy_record(bytes)?;
+            permission_from_event_flags(event.header.flags)
+                .map_err(DecodeError::InvalidPermissionFlags)?;
+            Ok(KernelRecord::Syscall(Box::new(event)))
         }
         value if value == RecordType::ExecAttempt as u16 => copy_record(bytes)
             .map(Box::new)

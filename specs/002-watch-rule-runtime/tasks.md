@@ -114,20 +114,20 @@
 
 ### Tests First
 
-- [ ] T046 [P] [US2] 为 watch 缺失 `-p`、空/重复/非法权限、空覆盖和错误码添加失败 parser/compiler 测试于 `crates/auditd-ebpf-rules/tests/parser_rejected.rs`、`crates/auditd-ebpf-rules/tests/permission_coverage.rs`
-- [ ] T047 [P] [US2] 为 `syscalls` 非空、coverage_version、coverage_b64/b32、稳定字段顺序和摘要变化添加失败 CLI 契约测试于 `tests/integration/rule_compatibility.rs`
-- [ ] T048 [P] [US2] 为 permission maps 与 syscall bitmap 同 generation 切换、无效候选保留旧版本和并发事件无非法组合添加失败重载测试于 `crates/auditd-ebpf/tests/reload.rs`、`tests/privileged/rule_reload.sh`
+- [X] T046 [P] [US2] 为 watch 缺失 `-p`、空/重复/非法权限、空覆盖和错误码添加失败 parser/compiler 测试于 `crates/auditd-ebpf-rules/tests/parser_rejected.rs`、`crates/auditd-ebpf-rules/tests/permission_coverage.rs`
+- [X] T047 [P] [US2] 为 `syscalls` 非空、coverage_version、coverage_b64/b32、稳定字段顺序和摘要变化添加失败 CLI 契约测试于 `tests/integration/rule_compatibility.rs`
+- [X] T048 [P] [US2] 为 permission maps 与 syscall bitmap 同 generation 切换、无效候选保留旧版本和并发事件无非法组合添加失败重载测试于 `crates/auditd-ebpf/tests/reload.rs`、`tests/privileged/rule_reload.sh`
 
 ### Implementation
 
-- [ ] T049 [US2] 强制 watch 恰好一个非空 `-p`、拒绝重复字符和非法路径，并保留文件/行号诊断于 `crates/auditd-ebpf-rules/src/parser.rs`、`crates/auditd-ebpf-rules/src/diagnostic.rs`
-- [ ] T050 [US2] 按契约输出非空 symbolic syscalls、coverage_version 和 b64/b32 权限列表，并使输出参与稳定版本摘要于 `crates/auditd-ebpf-rules/src/normalize.rs`
-- [ ] T051 [US2] 在 `check-rules --print-normalized` 输出 coverage，统一 E_PERMISSION/E_PERMISSION_COVERAGE/E_SYSCALL_RANGE/E_WATCH_PATH 退出码 3 诊断于 `crates/auditd-ebpf/src/commands/check_rules.rs`
-- [ ] T052 [US2] 扩展 SIGHUP staging，使 syscall bitmap、permission tables、maintenance set、rule version 和 RuleEngine 全部成功后才切换 active generation于 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/reload.rs`
-- [ ] T053 [US2] 在 eBPF 对象缺少 permission maps 或包含未知 ABI flags 时拒绝 permission 规则启动并输出可操作中文诊断于 `crates/auditd-ebpf/src/loader.rs`、`crates/auditd-ebpf/src/collector/decode.rs`
-- [ ] T054 [US2] 更新规则兼容矩阵、运行命令、coverage 示例、SIGHUP 行为和旧对象限制于 `docs/configuration.md`、`docs/operations.md`、`README.md`
-- [ ] T055 [US2] 执行 `quickstart.md` 第 3、4、10 节和 parser/compiler/CLI/reload 全量测试，将有效/无效重载结果记录于 `docs/watch-us2-validation.md`
-- [ ] T056 [US2] 在 T046–T055 全部通过后创建 `feat: validate and reload executable watch coverage` 里程碑提交，提交范围为 parser、normalize、CLI、reload、loader、文档和 `docs/watch-us2-validation.md`
+- [X] T049 [US2] 强制 watch 恰好一个非空 `-p`、拒绝重复字符和非法路径，并保留文件/行号诊断于 `crates/auditd-ebpf-rules/src/parser.rs`、`crates/auditd-ebpf-rules/src/diagnostic.rs`
+- [X] T050 [US2] 按契约输出非空 symbolic syscalls、coverage_version 和 b64/b32 权限列表，并使输出参与稳定版本摘要于 `crates/auditd-ebpf-rules/src/normalize.rs`
+- [X] T051 [US2] 在 `check-rules --print-normalized` 输出 coverage，统一 E_PERMISSION/E_PERMISSION_COVERAGE/E_SYSCALL_RANGE/E_WATCH_PATH 退出码 3 诊断于 `crates/auditd-ebpf/src/commands/check_rules.rs`
+- [X] T052 [US2] 扩展 SIGHUP staging，使 syscall bitmap、permission tables、maintenance set、rule version 和 RuleEngine 全部成功后才切换 active generation于 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/reload.rs`
+- [X] T053 [US2] 在 eBPF 对象缺少 permission maps 或包含未知 ABI flags 时拒绝 permission 规则启动并输出可操作中文诊断于 `crates/auditd-ebpf/src/loader.rs`、`crates/auditd-ebpf/src/collector/decode.rs`
+- [X] T054 [US2] 更新规则兼容矩阵、运行命令、coverage 示例、SIGHUP 行为和旧对象限制于 `docs/configuration.md`、`docs/operations.md`、`README.md`
+- [X] T055 [US2] 执行 `quickstart.md` 第 3、4、10 节和 parser/compiler/CLI/reload 全量测试，将有效/无效重载结果记录于 `docs/watch-us2-validation.md`
+- [X] T056 [US2] 在 T046–T055 全部通过后创建 `feat: validate and reload executable watch coverage` 里程碑提交，提交范围为 parser、normalize、CLI、reload、loader、文档和 `docs/watch-us2-validation.md`
 
 **Checkpoint**: 管理员能够在启动前证明 watch 可执行，且重载不会产生空覆盖或非法中间态。
 

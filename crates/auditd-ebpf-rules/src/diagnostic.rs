@@ -24,7 +24,21 @@ impl RuleErrors {
 
 impl core::fmt::Display for RuleErrors {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(formatter, "规则集包含 {} 个错误", self.0.len())
+        for (index, diagnostic) in self.0.iter().enumerate() {
+            if index != 0 {
+                formatter.write_str("; ")?;
+            }
+            write!(
+                formatter,
+                "{}:{}:{} {} {}",
+                diagnostic.file,
+                diagnostic.line,
+                diagnostic.column,
+                diagnostic.code,
+                diagnostic.message
+            )?;
+        }
+        Ok(())
     }
 }
 

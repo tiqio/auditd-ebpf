@@ -1,6 +1,6 @@
 use std::{path::PathBuf, process::Command};
 
-use auditd_ebpf_rules::{normalize::normalized_line, parse_rules};
+use auditd_ebpf_rules::{RuleCompiler, normalize::normalized_line, parse_rules};
 
 const SUPPORTED: &str = include_str!("../fixtures/rules/supported.rules");
 const REJECTED: &str = include_str!("../fixtures/rules/rejected.rules");
@@ -50,6 +50,87 @@ fn check_rules_print_normalized_matches_library_contract() {
     assert_eq!(stdout.lines().count(), 4);
     assert!(stdout.contains("key=exec-root"));
     assert!(stdout.contains("key=legacy-watch"));
+    let watch = stdout
+        .lines()
+        .find(|line| line.contains("key=legacy-watch"))
+        .unwrap();
+    assert!(!watch.contains("syscalls= path="));
+    assert!(watch.contains(" coverage_version=1 "));
+    assert!(watch.contains(" coverage_b64="));
+    assert!(watch.contains(" coverage_b32="));
+    assert!(watch.contains("r:"));
+    assert!(watch.contains("w:"));
+}
+
+#[test]
+fn watch_coverage_output_is_stable_and_changes_rule_digest() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/rules/watch-supported.rules");
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_auditd-ebpf"))
+            .args([
+                "check-rules",
+                "--rules-file",
+                fixture.to_str().unwrap(),
+                "--print-normalized",
+            ])
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    let second = run();
+    assert!(first.status.success());
+    assert_eq!(first.stdout, second.stdout);
+    let stdout = String::from_utf8(first.stdout).unwrap();
+    for line in stdout.lines() {
+        assert!(line.contains("syscalls="));
+        assert!(line.contains("coverage_version=1"));
+        assert!(line.contains("coverage_b64="));
+        assert!(line.contains("coverage_b32="));
+    }
+
+    let r = RuleCompiler::compile(
+        parse_rules("r.rules", "-w /tmp/ddtest -p r -k ddtest").unwrap(),
+        0,
+        Default::default(),
+    )
+    .unwrap();
+    let rw = RuleCompiler::compile(
+        parse_rules("rw.rules", "-w /tmp/ddtest -p rw -k ddtest").unwrap(),
+        0,
+        Default::default(),
+    )
+    .unwrap();
+    assert_ne!(r.version_hash, rw.version_hash);
+}
+
+#[test]
+fn invalid_watch_returns_three_with_location_and_error_code() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/rules/watch-rejected.rules");
+    for (line_number, line) in std::fs::read_to_string(fixture)
+        .unwrap()
+        .lines()
+        .enumerate()
+    {
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        let temp = std::env::temp_dir().join(format!(
+            "auditd-ebpf-invalid-watch-{}-{line_number}.rules",
+            std::process::id()
+        ));
+        std::fs::write(&temp, format!("{line}\n")).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_auditd-ebpf"))
+            .args(["check-rules", "--rules-file", temp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_file(&temp);
+        assert_eq!(output.status.code(), Some(3), "line={line}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(".rules"), "stderr={stderr}");
+        assert!(stderr.contains("E_"), "stderr={stderr}");
+    }
 }
 
 trait UnwrapErrOrElse<T, E> {
