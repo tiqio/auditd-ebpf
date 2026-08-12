@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    model::{BenchmarkSample, SampleStatus},
+    model::{BenchmarkMode, BenchmarkSample, SampleStatus, WatchMode},
     report::randomized_order,
 };
 
@@ -13,6 +13,45 @@ pub struct ScheduledRun {
     pub sequence: usize,
     pub implementation: String,
     pub attempt: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchScheduledRun {
+    pub sequence: usize,
+    pub mode: BenchmarkMode,
+    pub watch: WatchMode,
+    pub attempt: usize,
+    pub warmup_seconds: u64,
+    pub measurement_seconds: u64,
+    pub cooldown_seconds: u64,
+}
+
+/// 对每种输出模式分别编排 watch-off/watch-on，且每侧至少保留五次测量。
+pub fn schedule_watch_comparison(
+    samples_per_side: usize,
+    warmup_seconds: u64,
+    measurement_seconds: u64,
+    cooldown_seconds: u64,
+) -> Result<Vec<WatchScheduledRun>> {
+    anyhow::ensure!(samples_per_side >= 5, "watch 开关每侧至少需要 5 个有效样本");
+    anyhow::ensure!(measurement_seconds != 0, "测量时间必须大于零");
+    let mut runs = Vec::new();
+    for mode in [BenchmarkMode::CaptureOnly, BenchmarkMode::Operational] {
+        for attempt in 1..=samples_per_side {
+            for watch in [WatchMode::Disabled, WatchMode::Enabled] {
+                runs.push(WatchScheduledRun {
+                    sequence: runs.len(),
+                    mode: mode.clone(),
+                    watch,
+                    attempt,
+                    warmup_seconds,
+                    measurement_seconds,
+                    cooldown_seconds,
+                });
+            }
+        }
+    }
+    Ok(runs)
 }
 
 pub fn schedule(seed: u64, valid_samples_per_implementation: usize) -> Result<Vec<ScheduledRun>> {

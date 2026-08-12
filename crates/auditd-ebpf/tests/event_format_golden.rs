@@ -1,10 +1,11 @@
+use auditd_ebpf::health::watch_gap::WatchGapReason;
 use auditd_ebpf::{
     health::counters::HealthCounters,
     identity::HostIdentity,
     output::{
         event_formatter::{AuditEvent, format_event},
         status_formatter::unclean_shutdown_gap,
-        status_formatter::{StatusRecord, diagnostic, status},
+        status_formatter::{StatusRecord, diagnostic, status, watch_diagnostic},
     },
     rules::argv_policy::EffectiveArgvOutput,
 };
@@ -174,4 +175,18 @@ fn diagnostic_and_status_match_golden_and_never_contain_argv() {
     );
     assert!(!diag.contains(" a0="));
     assert!(!state.contains(" a0="));
+
+    let watch_diag = watch_diagnostic(
+        &identity,
+        WatchGapReason::FdAssociationStale,
+        Some(7),
+        1200,
+        1201,
+        "ftruncate",
+    );
+    assert_eq!(
+        watch_diag,
+        include_str!("../../../tests/golden/events/watch-diag.log")
+    );
+    assert!(!watch_diag.contains("argv"));
 }

@@ -153,6 +153,19 @@ impl RuleEngine {
                 && !rule.permissions.is_empty()
         })
     }
+
+    /// 判断当前 syscall 是否落入任一 watch 规则的编译覆盖。
+    ///
+    /// 该判断只用于候选计数与缺口判定；最终命中仍必须经过路径、身份、结果和权限求值，
+    /// 不能把内核 bitmap 的粗粒度候选直接当作审计事件。
+    #[must_use]
+    pub fn is_watch_candidate(&self, arch: Arch, syscall: &str) -> bool {
+        self.plan.rules.iter().any(|rule| {
+            rule.kind == RuleKind::Watch
+                && rule.arch.is_none_or(|rule_arch| rule_arch == arch)
+                && rule_covers_syscall(&self.plan, rule, arch, syscall)
+        })
+    }
 }
 
 fn matches_rule(plan: &KernelFilterPlan, rule: &AuditRule, event: &CandidateEvent<'_>) -> bool {

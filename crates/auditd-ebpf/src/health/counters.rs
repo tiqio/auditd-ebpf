@@ -24,6 +24,14 @@ pub struct HealthCounters {
     pub rule_reload_success_total: u64,
     pub rule_reload_failed_total: u64,
     pub gap_records_generated_total: u64,
+    pub watch_candidates_total: u64,
+    pub watch_matches_total: u64,
+    pub watch_read_matches_total: u64,
+    pub watch_write_matches_total: u64,
+    pub watch_exec_matches_total: u64,
+    pub watch_attr_matches_total: u64,
+    pub watch_permission_failures_total: u64,
+    pub watch_fd_failures_total: u64,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -67,6 +75,11 @@ impl HealthCounters {
                     .events_consumed_total
                     .saturating_add(self.gap_records_generated_total)
             && self.exec_argv_suppressed_total <= self.exec_argv_captured_total
+            && self.watch_matches_total <= self.watch_candidates_total
+            && self.watch_read_matches_total <= self.watch_matches_total
+            && self.watch_write_matches_total <= self.watch_matches_total
+            && self.watch_exec_matches_total <= self.watch_matches_total
+            && self.watch_attr_matches_total <= self.watch_matches_total
     }
 
     pub fn record_unclean_shutdown(&mut self) -> Result<(), CounterError> {
@@ -114,6 +127,26 @@ impl HealthCounters {
             .saturating_add(self.exec_argv_dropped_total)
             .saturating_add(self.internal_dropped_total)
             .saturating_add(self.permission_classification_failed_total)
+    }
+
+    /// 记录一次 watch 命中。组合权限（例如 `rw`）会同时增加 r 与 w，但只增加一次总命中。
+    pub fn record_watch_match(
+        &mut self,
+        permissions: auditd_ebpf_common::permission::PermissionMask,
+    ) {
+        self.watch_matches_total = self.watch_matches_total.saturating_add(1);
+        if permissions.intersects(auditd_ebpf_common::permission::PermissionMask::READ) {
+            self.watch_read_matches_total = self.watch_read_matches_total.saturating_add(1);
+        }
+        if permissions.intersects(auditd_ebpf_common::permission::PermissionMask::WRITE) {
+            self.watch_write_matches_total = self.watch_write_matches_total.saturating_add(1);
+        }
+        if permissions.intersects(auditd_ebpf_common::permission::PermissionMask::EXEC) {
+            self.watch_exec_matches_total = self.watch_exec_matches_total.saturating_add(1);
+        }
+        if permissions.intersects(auditd_ebpf_common::permission::PermissionMask::ATTR) {
+            self.watch_attr_matches_total = self.watch_attr_matches_total.saturating_add(1);
+        }
     }
 }
 

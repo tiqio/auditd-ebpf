@@ -11,6 +11,7 @@ pub struct HealthStateMachine {
     state: HealthState,
     last_reason: Option<String>,
     last_gap_at: Option<Duration>,
+    first_continuous_gap_at: Option<Duration>,
 }
 
 impl HealthStateMachine {
@@ -20,6 +21,7 @@ impl HealthStateMachine {
             state: HealthState::Starting,
             last_reason: None,
             last_gap_at: None,
+            first_continuous_gap_at: None,
         }
     }
     pub fn ready(&mut self) {
@@ -31,7 +33,12 @@ impl HealthStateMachine {
     pub fn record_gap_at(&mut self, reason: impl Into<String>, now: Duration) {
         self.last_reason = Some(reason.into());
         self.last_gap_at = Some(now);
-        self.state = HealthState::Degraded;
+        let first = *self.first_continuous_gap_at.get_or_insert(now);
+        self.state = if now.saturating_sub(first) >= UNHEALTHY_GAP_WINDOW {
+            HealthState::Unhealthy
+        } else {
+            HealthState::Degraded
+        };
     }
     pub fn recover_if_quiet(&mut self, now: Duration) -> bool {
         if self.state != HealthState::Degraded {
@@ -45,6 +52,7 @@ impl HealthStateMachine {
         }
         self.state = HealthState::Healthy;
         self.last_reason = None;
+        self.first_continuous_gap_at = None;
         true
     }
     pub fn fail(&mut self, reason: impl Into<String>) {
@@ -73,3 +81,4 @@ impl Default for HealthStateMachine {
 use std::time::Duration;
 
 const DEGRADED_RECOVERY_WINDOW: Duration = Duration::from_secs(5 * 60);
+const UNHEALTHY_GAP_WINDOW: Duration = Duration::from_secs(10);

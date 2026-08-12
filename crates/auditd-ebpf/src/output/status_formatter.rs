@@ -67,6 +67,30 @@ pub fn diagnostic(
     )
 }
 
+/// 输出结构化 watch 缺口诊断。诊断只包含定位元数据，绝不接收或格式化 argv。
+#[must_use]
+pub fn watch_diagnostic(
+    identity: &HostIdentity,
+    reason: crate::health::watch_gap::WatchGapReason,
+    rule_version: Option<u64>,
+    pid: u32,
+    tid: u32,
+    syscall: &str,
+) -> String {
+    let rule_version = rule_version.map_or_else(|| "?".into(), |value| value.to_string());
+    format!(
+        "type=AUDITD_EBPF_DIAG host={} machine_id={} level=error code=watch_gap component=collector reason={} stage={} rule_version={} pid={} tid={} syscall={} message=\"watch candidate rejected\"\n",
+        super::event_formatter::escape(identity.host.as_bytes()),
+        identity.machine_id,
+        reason.as_str(),
+        reason.stage(),
+        rule_version,
+        pid,
+        tid,
+        super::event_formatter::escape(syscall.as_bytes()),
+    )
+}
+
 #[must_use]
 pub fn status(identity: &HostIdentity, record: &StatusRecord<'_>) -> String {
     let reason = record.reason.map_or_else(String::new, |reason| {
@@ -79,7 +103,7 @@ pub fn status(identity: &HostIdentity, record: &StatusRecord<'_>) -> String {
         .rule_version
         .map_or_else(|| "?".to_owned(), |version| version.to_string());
     format!(
-        "type=AUDITD_EBPF_STATUS host={} machine_id={} state={}{} uptime_s={} rule_version={} programs_attached={} events_seen={} events_submitted={} events_consumed={} events_matched={} events_unmatched={} events_output={} argv_captured={} argv_suppressed={} ring_lost={} kernel_lost={} inflight_lost={} correlation_lost={} argv_lost={} internal_lost={} queue_lost={} path_lost={} unclean_shutdown={} parse_failed={} stdout_failed={} reload_success={} reload_failed={} gaps_generated={} queue_used_bytes={} queue_limit_bytes={} queue_max_bytes={} final={}\n",
+        "type=AUDITD_EBPF_STATUS host={} machine_id={} state={}{} uptime_s={} rule_version={} programs_attached={} events_seen={} events_submitted={} events_consumed={} events_matched={} events_unmatched={} events_output={} watch_candidates={} watch_matches={} watch_r={} watch_w={} watch_x={} watch_a={} watch_permission_failures={} watch_fd_failures={} argv_captured={} argv_suppressed={} ring_lost={} kernel_lost={} inflight_lost={} correlation_lost={} argv_lost={} internal_lost={} queue_lost={} path_lost={} unclean_shutdown={} parse_failed={} stdout_failed={} reload_success={} reload_failed={} gaps_generated={} queue_used_bytes={} queue_limit_bytes={} queue_max_bytes={} final={}\n",
         super::event_formatter::escape(identity.host.as_bytes()),
         identity.machine_id,
         record.state,
@@ -93,6 +117,14 @@ pub fn status(identity: &HostIdentity, record: &StatusRecord<'_>) -> String {
         record.counters.events_matched_total,
         record.counters.events_unmatched_total,
         record.counters.events_output_total,
+        record.counters.watch_candidates_total,
+        record.counters.watch_matches_total,
+        record.counters.watch_read_matches_total,
+        record.counters.watch_write_matches_total,
+        record.counters.watch_exec_matches_total,
+        record.counters.watch_attr_matches_total,
+        record.counters.watch_permission_failures_total,
+        record.counters.watch_fd_failures_total,
         record.counters.exec_argv_captured_total,
         record.counters.exec_argv_suppressed_total,
         record.counters.ring_reserve_failed_total,

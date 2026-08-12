@@ -6,7 +6,10 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    model::{BENCHMARK_PROTOCOL_VERSION, BenchmarkReport, BenchmarkSample, SampleStatus},
+    model::{
+        BENCHMARK_PROTOCOL_VERSION, BenchmarkReport, BenchmarkSample, SampleStatus,
+        WatchBenchmarkReport, WatchBenchmarkSample, WatchMode,
+    },
     workloads::StableRng,
 };
 
@@ -16,6 +19,50 @@ pub enum ReportStatus {
     Passed,
     Failed,
     Invalid,
+}
+
+/// watch 对照报告必须同时满足样本数、零正确性缺口和完整资源字段。
+#[must_use]
+pub fn build_watch_report(samples: Vec<WatchBenchmarkSample>) -> WatchBenchmarkReport {
+    let valid = |sample: &&WatchBenchmarkSample| matches!(sample.status, SampleStatus::Valid);
+    let valid_disabled_samples = samples
+        .iter()
+        .filter(valid)
+        .filter(|sample| sample.watch == WatchMode::Disabled)
+        .count();
+    let valid_enabled_samples = samples
+        .iter()
+        .filter(valid)
+        .filter(|sample| sample.watch == WatchMode::Enabled)
+        .count();
+    let invalid_samples = samples.len() - valid_disabled_samples - valid_enabled_samples;
+    let mut reasons = Vec::new();
+    if valid_disabled_samples < 5 || valid_enabled_samples < 5 {
+        reasons.push("watch 关闭和开启每侧都必须至少有 5 个有效样本".into());
+    }
+    if invalid_samples != 0 {
+        reasons.push(format!("存在 {invalid_samples} 个非有效样本"));
+    }
+    for sample in &samples {
+        if sample.ledger_entries != sample.matched_entries || sample.lost_events != 0 {
+            reasons.push(format!("{} 正确性失败，报告必须 invalid", sample.id));
+        }
+        if !sample.operations_per_second.is_finite()
+            || !sample.agent_cpu_percent.is_finite()
+            || !sample.p95_latency_us.is_finite()
+        {
+            reasons.push(format!("{} 包含非有限指标", sample.id));
+        }
+    }
+    WatchBenchmarkReport {
+        protocol_version: BENCHMARK_PROTOCOL_VERSION,
+        samples,
+        valid_disabled_samples,
+        valid_enabled_samples,
+        invalid_samples,
+        performance_claim_allowed: reasons.is_empty(),
+        reasons,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

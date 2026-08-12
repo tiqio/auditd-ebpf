@@ -27,6 +27,15 @@ pub struct WorkloadOperation {
     pub expected_events: Vec<NormalizedEvent>,
 }
 
+/// path workload 的逐操作账本。即使操作失败也必须保留条目，防止报告只统计成功事件。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathLedgerEntry {
+    pub target_path: String,
+    pub operation_id: String,
+    pub expected_permission: String,
+    pub completed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Scenario {
@@ -76,6 +85,41 @@ pub struct BenchmarkReport {
     pub raw_artifacts: Vec<String>,
     pub valid_samples: usize,
     pub invalid_samples: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WatchMode {
+    Disabled,
+    Enabled,
+}
+
+/// 同版本 auditd-ebpf 在 watch 关闭/开启时的独立样本。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WatchBenchmarkSample {
+    pub id: String,
+    pub mode: BenchmarkMode,
+    pub watch: WatchMode,
+    pub status: SampleStatus,
+    pub operations_per_second: f64,
+    pub agent_cpu_percent: f64,
+    pub process_rss_kib: u64,
+    pub p95_latency_us: f64,
+    pub lost_events: u64,
+    pub ledger_entries: usize,
+    pub matched_entries: usize,
+    pub raw_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WatchBenchmarkReport {
+    pub protocol_version: u32,
+    pub samples: Vec<WatchBenchmarkSample>,
+    pub valid_disabled_samples: usize,
+    pub valid_enabled_samples: usize,
+    pub invalid_samples: usize,
+    pub performance_claim_allowed: bool,
+    pub reasons: Vec<String>,
 }
 
 /// CLI 解析后供 runner 使用的稳定配置。

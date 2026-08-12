@@ -1,7 +1,7 @@
 use auditd_ebpf_common::{event::permission_from_event_flags, permission::PermissionMask};
 use auditd_ebpf_rules::{
-    Arch, ArgvOutput, KernelFilterPlan, RuleCompiler, parse_rules, source::sorted_rule_files,
-    syscall_name,
+    Arch, ArgvOutput, KernelFilterPlan, RuleCompiler, RuleKind, parse_rules,
+    source::sorted_rule_files, syscall_name,
 };
 use std::{
     collections::BTreeMap,
@@ -22,7 +22,10 @@ use tokio::signal::unix::{SignalKind, signal};
 use crate::{
     capabilities::drop_runtime_capabilities,
     collector::runtime::{CollectedRecord, CollectorGap, CollectorRuntime, CorrelatedExec},
-    health::counters::HealthCounters,
+    health::{
+        counters::HealthCounters,
+        watch_gap::{WatchGapReason, decide_watch_gap},
+    },
     identity::{HostIdentity, MachineIdSource},
     lifecycle::{
         model::{LifecycleMarker, LifecycleState},
@@ -32,7 +35,9 @@ use crate::{
     output::{
         adaptive_queue::{DEFAULT_INITIAL_BYTES, DEFAULT_MAX_BYTES},
         event_formatter::{AuditEvent, format_event},
-        status_formatter::{StatusRecord, collector_gap, diagnostic, status, unclean_shutdown_gap},
+        status_formatter::{
+            StatusRecord, collector_gap, diagnostic, status, unclean_shutdown_gap, watch_diagnostic,
+        },
         writer::{OutputPipeline, WriterError},
     },
     process_cache::{
@@ -522,6 +527,14 @@ fn runtime_health_counters(
         counters.rule_reload_success_total = snapshot.reload_success;
         counters.rule_reload_failed_total = snapshot.reload_failed;
         counters.gap_records_generated_total = snapshot.gaps_generated;
+        counters.watch_candidates_total = snapshot.watch_candidates;
+        counters.watch_matches_total = snapshot.watch_matches;
+        counters.watch_read_matches_total = snapshot.watch_read_matches;
+        counters.watch_write_matches_total = snapshot.watch_write_matches;
+        counters.watch_exec_matches_total = snapshot.watch_exec_matches;
+        counters.watch_attr_matches_total = snapshot.watch_attr_matches;
+        counters.watch_permission_failures_total = snapshot.watch_permission_failures;
+        counters.watch_fd_failures_total = snapshot.watch_fd_failures;
     }
     counters.unclean_shutdown_detected_total = u64::from(previous_dirty);
     anyhow::ensure!(counters.all_invariants_hold(), "运行时计数不变量被破坏");
@@ -572,6 +585,15 @@ fn emit_runtime_status(
         (state, None)
     } else if previous_dirty {
         ("degraded", Some("unclean_shutdown"))
+    } else if started_at.elapsed() >= Duration::from_secs(10)
+        && (counters.kernel_lost_total() != 0
+            || counters.watch_permission_failures_total != 0
+            || counters.watch_fd_failures_total != 0
+            || counters.path_resolution_failed_total != 0
+            || counters.queue_dropped_total != 0
+            || counters.stdout_write_failed_total != 0)
+    {
+        ("unhealthy", Some("persistent_audit_gap"))
     } else if counters.kernel_lost_total() != 0 {
         ("degraded", Some("kernel_event_loss"))
     } else if counters.path_resolution_failed_total != 0 {
@@ -607,6 +629,17 @@ fn final_lifecycle_counters(counters: &HealthCounters) -> BTreeMap<String, u64> 
         ("events_consumed".into(), counters.events_consumed_total),
         ("events_matched".into(), counters.events_matched_total),
         ("events_output".into(), counters.events_output_total),
+        ("watch_candidates".into(), counters.watch_candidates_total),
+        ("watch_matches".into(), counters.watch_matches_total),
+        ("watch_r".into(), counters.watch_read_matches_total),
+        ("watch_w".into(), counters.watch_write_matches_total),
+        ("watch_x".into(), counters.watch_exec_matches_total),
+        ("watch_a".into(), counters.watch_attr_matches_total),
+        (
+            "watch_permission_failures".into(),
+            counters.watch_permission_failures_total,
+        ),
+        ("watch_fd_failures".into(), counters.watch_fd_failures_total),
         ("ring_lost".into(), counters.ring_reserve_failed_total),
         ("kernel_lost".into(), counters.kernel_lost_total()),
         ("queue_lost".into(), counters.queue_dropped_total),
@@ -684,6 +717,14 @@ struct CollectorCounters {
     argv_suppressed: AtomicU64,
     reload_success: AtomicU64,
     reload_failed: AtomicU64,
+    watch_candidates: AtomicU64,
+    watch_matches: AtomicU64,
+    watch_read_matches: AtomicU64,
+    watch_write_matches: AtomicU64,
+    watch_exec_matches: AtomicU64,
+    watch_attr_matches: AtomicU64,
+    watch_permission_failures: AtomicU64,
+    watch_fd_failures: AtomicU64,
     queue_used_bytes: AtomicU64,
     queue_limit_bytes: AtomicU64,
     queue_max_bytes: AtomicU64,
@@ -703,6 +744,14 @@ struct CollectorSnapshot {
     argv_suppressed: u64,
     reload_success: u64,
     reload_failed: u64,
+    watch_candidates: u64,
+    watch_matches: u64,
+    watch_read_matches: u64,
+    watch_write_matches: u64,
+    watch_exec_matches: u64,
+    watch_attr_matches: u64,
+    watch_permission_failures: u64,
+    watch_fd_failures: u64,
     queue_used_bytes: u64,
     queue_limit_bytes: u64,
     queue_max_bytes: u64,
@@ -734,6 +783,14 @@ impl CollectorCounters {
             argv_suppressed: self.argv_suppressed.load(Ordering::Relaxed),
             reload_success: self.reload_success.load(Ordering::Relaxed),
             reload_failed: self.reload_failed.load(Ordering::Relaxed),
+            watch_candidates: self.watch_candidates.load(Ordering::Relaxed),
+            watch_matches: self.watch_matches.load(Ordering::Relaxed),
+            watch_read_matches: self.watch_read_matches.load(Ordering::Relaxed),
+            watch_write_matches: self.watch_write_matches.load(Ordering::Relaxed),
+            watch_exec_matches: self.watch_exec_matches.load(Ordering::Relaxed),
+            watch_attr_matches: self.watch_attr_matches.load(Ordering::Relaxed),
+            watch_permission_failures: self.watch_permission_failures.load(Ordering::Relaxed),
+            watch_fd_failures: self.watch_fd_failures.load(Ordering::Relaxed),
             queue_used_bytes: self.queue_used_bytes.load(Ordering::Relaxed),
             queue_limit_bytes: self.queue_limit_bytes.load(Ordering::Relaxed),
             queue_max_bytes: self.queue_max_bytes.load(Ordering::Relaxed),
@@ -926,10 +983,30 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                             counters
                                 .path_resolution_failed
                                 .fetch_add(1, Ordering::Relaxed);
-                            // 全局 permission coverage 会观察大量与本规则路径无关的短命进程。
-                            // 逐事件输出同类 gap 会反向淹没真正审计事件；计数保留完整数量，
-                            // 周期健康记录负责聚合暴露，US3 再按原因输出受控样本。
-                            let _ = reason;
+                            let syscall = syscall_name_for_event(&event);
+                            let watch_candidate = match event.arch {
+                                0xc000_003e => engine.is_watch_candidate(Arch::B64, syscall),
+                                0x4000_0003 => engine.is_watch_candidate(Arch::B32, syscall),
+                                _ => false,
+                            };
+                            if watch_candidate && let Some(gap_reason) = classify_watch_gap(&reason)
+                            {
+                                counters.watch_candidates.fetch_add(1, Ordering::Relaxed);
+                                record_watch_gap_counter(counters, gap_reason);
+                                if submit_watch_gap(
+                                    pipeline,
+                                    identity,
+                                    counters,
+                                    gap_reason,
+                                    event.header.rule_version,
+                                    event.header.pid_tgid,
+                                    syscall,
+                                    state.output_sequence,
+                                ) {
+                                    return true;
+                                }
+                                state.output_sequence = state.output_sequence.wrapping_add(1);
+                            }
                             apply_syscall_cache_updates(&mut state.process_cache, &event, None);
                             continue;
                         }
@@ -943,16 +1020,44 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                     }
                 };
                 let syscall = syscall_name(arch, event.syscall_nr).unwrap_or("unknown");
+                let watch_candidate = engine.is_watch_candidate(arch, syscall);
+                if watch_candidate {
+                    counters.watch_candidates.fetch_add(1, Ordering::Relaxed);
+                }
                 let permission = match permission_from_event_flags(event.header.flags) {
                     Ok(permission) => permission,
                     Err(error) => {
-                        let reason = format!(
-                            "permission_flags_malformed:syscall={syscall}:flags={:#x}:error={error:?}",
-                            event.header.flags
-                        );
-                        if submit_gap(pipeline, identity, counters, &reason, state.output_sequence)
-                        {
-                            return true;
+                        if watch_candidate {
+                            record_watch_gap_counter(
+                                counters,
+                                WatchGapReason::PermissionClassificationFailed,
+                            );
+                            if submit_watch_gap(
+                                pipeline,
+                                identity,
+                                counters,
+                                WatchGapReason::PermissionClassificationFailed,
+                                event.header.rule_version,
+                                event.header.pid_tgid,
+                                syscall,
+                                state.output_sequence,
+                            ) {
+                                return true;
+                            }
+                        } else {
+                            let reason = format!(
+                                "permission_flags_malformed:syscall={syscall}:flags={:#x}:error={error:?}",
+                                event.header.flags
+                            );
+                            if submit_gap(
+                                pipeline,
+                                identity,
+                                counters,
+                                &reason,
+                                state.output_sequence,
+                            ) {
+                                return true;
+                            }
                         }
                         state.output_sequence = state.output_sequence.wrapping_add(1);
                         apply_syscall_cache_updates(
@@ -975,17 +1080,28 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                         )
                         .is_some();
                 if permission_gap_matches_path {
-                    let reason = format!(
-                        "permission_flags_missing:tgid={}:tid={}:syscall={syscall}",
-                        event.header.pid_tgid >> 32,
-                        event.header.pid_tgid as u32
-                    );
-                    if submit_gap(pipeline, identity, counters, &reason, state.output_sequence) {
+                    record_watch_gap_counter(counters, WatchGapReason::PermissionFlagsMissing);
+                    if submit_watch_gap(
+                        pipeline,
+                        identity,
+                        counters,
+                        WatchGapReason::PermissionFlagsMissing,
+                        event.header.rule_version,
+                        event.header.pid_tgid,
+                        syscall,
+                        state.output_sequence,
+                    ) {
                         return true;
                     }
                     state.output_sequence = state.output_sequence.wrapping_add(1);
+                    apply_syscall_cache_updates(
+                        &mut state.process_cache,
+                        &event,
+                        resolved_paths.first().map(PathBuf::as_path),
+                    );
+                    continue;
                 }
-                if let Some((line, argv_suppressed)) = format_syscall_record(
+                if let Some((line, argv_suppressed, watch_permissions)) = format_syscall_record(
                     &engine,
                     identity,
                     &event,
@@ -995,6 +1111,9 @@ fn process_collected_records<StdoutWriter: Write, StderrWriter: Write>(
                     state.output_sequence,
                 ) {
                     counters.matched.fetch_add(1, Ordering::Relaxed);
+                    if let Some(permissions) = watch_permissions {
+                        record_watch_match(counters, permissions);
+                    }
                     if argv_suppressed {
                         counters.argv_suppressed.fetch_add(1, Ordering::Relaxed);
                     }
@@ -1057,6 +1176,105 @@ fn submit_gap<StdoutWriter: Write, StderrWriter: Write>(
         }
         Err(error) => record_pipeline_failure(pipeline, identity, counters, &error),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn submit_watch_gap<StdoutWriter: Write, StderrWriter: Write>(
+    pipeline: &mut OutputPipeline<StdoutWriter, StderrWriter>,
+    identity: &HostIdentity,
+    counters: &CollectorCounters,
+    reason: WatchGapReason,
+    rule_version: u64,
+    pid_tgid: u64,
+    syscall: &str,
+    sequence: u64,
+) -> bool {
+    let decision = decide_watch_gap(reason);
+    debug_assert!(!decision.emit_audit_event);
+    counters.gaps_generated.fetch_add(1, Ordering::Relaxed);
+    let (pid, tid) = process_ids(pid_tgid);
+    let line = collector_gap(identity, reason.as_str().as_bytes(), sequence, now_millis());
+    let result = pipeline
+        .enqueue_gap(line.as_bytes())
+        .and_then(|_| pipeline.drain_all());
+    if pipeline
+        .write_operational(
+            watch_diagnostic(identity, reason, Some(rule_version), pid, tid, syscall).as_bytes(),
+        )
+        .is_err()
+    {
+        // stderr 失败不能把 stdout 审计事件错误地标成成功；统一交给 writer 错误路径统计。
+    }
+    match result {
+        Ok(()) => false,
+        Err(error) => record_pipeline_failure(pipeline, identity, counters, &error),
+    }
+}
+
+fn classify_watch_gap(reason: &str) -> Option<WatchGapReason> {
+    [
+        ("path_argument_missing", WatchGapReason::PathArgumentMissing),
+        (
+            "path_argument_truncated",
+            WatchGapReason::PathArgumentTruncated,
+        ),
+        (
+            "thread_context_missing",
+            WatchGapReason::ThreadContextMissing,
+        ),
+        ("mount_context_stale", WatchGapReason::MountContextStale),
+        (
+            "fd_association_missing",
+            WatchGapReason::FdAssociationMissing,
+        ),
+        ("fd_association_stale", WatchGapReason::FdAssociationStale),
+        (
+            "path_resolution_failed",
+            WatchGapReason::ThreadContextMissing,
+        ),
+    ]
+    .into_iter()
+    .find_map(|(prefix, gap)| reason.starts_with(prefix).then_some(gap))
+}
+
+fn record_watch_gap_counter(counters: &CollectorCounters, reason: WatchGapReason) {
+    match reason {
+        WatchGapReason::PermissionFlagsMissing | WatchGapReason::PermissionClassificationFailed => {
+            counters
+                .watch_permission_failures
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        WatchGapReason::FdAssociationMissing | WatchGapReason::FdAssociationStale => {
+            counters.watch_fd_failures.fetch_add(1, Ordering::Relaxed);
+        }
+        WatchGapReason::PathArgumentMissing
+        | WatchGapReason::PathArgumentTruncated
+        | WatchGapReason::ThreadContextMissing
+        | WatchGapReason::MountContextStale => {}
+    }
+}
+
+fn record_watch_match(counters: &CollectorCounters, permissions: PermissionMask) {
+    counters.watch_matches.fetch_add(1, Ordering::Relaxed);
+    for (permission, counter) in [
+        (PermissionMask::READ, &counters.watch_read_matches),
+        (PermissionMask::WRITE, &counters.watch_write_matches),
+        (PermissionMask::EXEC, &counters.watch_exec_matches),
+        (PermissionMask::ATTR, &counters.watch_attr_matches),
+    ] {
+        if permissions.intersects(permission) {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+fn syscall_name_for_event(event: &auditd_ebpf_common::event::SyscallEvent) -> &'static str {
+    let arch = match event.arch {
+        0xc000_003e => Arch::B64,
+        0x4000_0003 => Arch::B32,
+        _ => return "unknown",
+    };
+    syscall_name(arch, event.syscall_nr).unwrap_or("unknown")
 }
 
 fn record_pipeline_failure<StdoutWriter: Write, StderrWriter: Write>(
@@ -1375,7 +1593,7 @@ fn format_syscall_record(
     resolved_paths: &[PathBuf],
     permissions: Option<PermissionMask>,
     output_sequence: u64,
-) -> Option<(String, bool)> {
+) -> Option<(String, bool, Option<PermissionMask>)> {
     let arch = match event.arch {
         0xc000_003e => Arch::B64,
         0x4000_0003 => Arch::B32,
@@ -1399,6 +1617,13 @@ fn format_syscall_record(
         .unwrap_or(event.comm.len());
     let argv_suppressed = matched.argv_output == EffectiveArgvOutput::Suppressed;
     let permission_text = permissions.map(|permission| permission.to_string());
+    // `bool::then_some` 会急切求值参数；这里必须显式分支，否则普通 syscall 规则在
+    // `permissions=None` 时也会被 `?` 提前丢弃，造成与 watch 无关的静默漏报。
+    let watch_permissions = if matched.rule.kind == RuleKind::Watch {
+        Some(permissions?)
+    } else {
+        None
+    };
     Some((
         format_event(&AuditEvent {
             unix_seconds: now.as_secs(),
@@ -1441,6 +1666,7 @@ fn format_syscall_record(
             },
         }),
         argv_suppressed,
+        watch_permissions,
     ))
 }
 

@@ -57,6 +57,38 @@ fn 所有流水线计数不变量都可检查() {
 }
 
 #[test]
+fn watch候选命中权限和失败计数保持单调不变量() {
+    use auditd_ebpf_common::permission::PermissionMask;
+
+    let mut counters = HealthCounters {
+        watch_candidates_total: 2,
+        ..HealthCounters::default()
+    };
+    counters.record_watch_match(PermissionMask::READ | PermissionMask::WRITE);
+    counters.watch_permission_failures_total += 1;
+    counters.watch_fd_failures_total += 1;
+
+    assert_eq!(counters.watch_matches_total, 1);
+    assert_eq!(counters.watch_read_matches_total, 1);
+    assert_eq!(counters.watch_write_matches_total, 1);
+    assert_eq!(counters.watch_exec_matches_total, 0);
+    assert!(counters.all_invariants_hold());
+
+    counters.watch_matches_total = 3;
+    assert!(!counters.all_invariants_hold());
+}
+
+#[test]
+fn 连续缺口十秒内从degraded升级为unhealthy() {
+    let mut health = HealthStateMachine::new();
+    health.ready();
+    health.record_gap_at("fd_association_stale", Duration::from_secs(1));
+    assert_eq!(health.state(), HealthState::Degraded);
+    health.record_gap_at("fd_association_stale", Duration::from_secs(11));
+    assert_eq!(health.state(), HealthState::Unhealthy);
+}
+
+#[test]
 fn 异常关闭计数首版只能从零增加到一() {
     let mut counters = HealthCounters::default();
     assert!(counters.record_unclean_shutdown().is_ok());

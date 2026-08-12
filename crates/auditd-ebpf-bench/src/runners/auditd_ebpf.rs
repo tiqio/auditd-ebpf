@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use crate::model::BenchmarkMode;
+use crate::model::{BenchmarkMode, WatchMode};
 
 #[derive(Debug, Clone)]
 pub struct AuditdEbpfRunner {
@@ -34,6 +34,22 @@ impl AuditdEbpfRunner {
             .stderr(Stdio::inherit())
             .spawn()
             .with_context(|| format!("启动 {}", self.binary.display()))
+    }
+
+    /// 为同一二进制选择 watch-off/watch-on 规则文件，保证比较不混入版本差异。
+    pub fn start_watch_comparison(
+        &self,
+        mode: BenchmarkMode,
+        watch: WatchMode,
+        disabled_rules: &Path,
+        capture_path: &Path,
+    ) -> Result<Child> {
+        let mut selected = self.clone();
+        selected.rules = match watch {
+            WatchMode::Disabled => disabled_rules.to_path_buf(),
+            WatchMode::Enabled => self.rules.clone(),
+        };
+        selected.start(mode, capture_path)
     }
 
     pub fn stop_and_collect(&self, child: &mut Child, counters_path: &Path) -> Result<()> {

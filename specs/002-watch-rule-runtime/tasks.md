@@ -141,26 +141,26 @@
 
 ### Tests First
 
-- [ ] T057 [P] [US3] 为 watch candidates/matches、四类权限命中、permission/FD failure 单调性和总流水线不变量添加失败测试于 `crates/auditd-ebpf/tests/health_contract.rs`
-- [ ] T058 [P] [US3] 为 permission_flags_missing、classification_failed、fd_missing/stale、path truncated 和 mount stale 的 gap 决策添加失败测试于 `crates/auditd-ebpf/tests/watch_gaps.rs`
-- [ ] T059 [P] [US3] 为新增 status/diag 字段、固定顺序、未知值和绝不包含 argv 添加失败 golden 于 `crates/auditd-ebpf/tests/event_format_golden.rs`、`tests/golden/events/status.log`、`tests/golden/events/diag.log`
-- [ ] T060 [P] [US3] 创建 permission、FD、path、RingBuf、queue 和 stdout 故障注入脚本骨架于 `tests/failure-injection/watch_rules.sh`
-- [ ] T061 [P] [US3] 为 path workload ledger、至少 5 个样本、正确性失败 invalid 和 watch 开关前后指标字段添加失败测试于 `crates/auditd-ebpf-bench/tests/watch_report.rs`
+- [X] T057 [P] [US3] 为 watch candidates/matches、四类权限命中、permission/FD failure 单调性和总流水线不变量添加失败测试于 `crates/auditd-ebpf/tests/health_contract.rs`
+- [X] T058 [P] [US3] 为 permission_flags_missing、classification_failed、fd_missing/stale、path truncated 和 mount stale 的 gap 决策添加失败测试于 `crates/auditd-ebpf/tests/watch_gaps.rs`
+- [X] T059 [P] [US3] 为新增 status/diag 字段、固定顺序、未知值和绝不包含 argv 添加失败 golden 于 `crates/auditd-ebpf/tests/event_format_golden.rs`、`tests/golden/events/status.log`、`tests/golden/events/diag.log`
+- [X] T060 [P] [US3] 创建 permission、FD、path、RingBuf、queue 和 stdout 故障注入脚本骨架于 `tests/failure-injection/watch_rules.sh`
+- [X] T061 [P] [US3] 为 path workload ledger、至少 5 个样本、正确性失败 invalid 和 watch 开关前后指标字段添加失败测试于 `crates/auditd-ebpf-bench/tests/watch_report.rs`
 
 ### Observability and Degradation
 
-- [ ] T062 [US3] 增加 watch candidate/match、r/w/x/a match、permission failure 和 FD failure 计数模型及序列化字段于 `crates/auditd-ebpf/src/health/counters.rs`、`crates/auditd-ebpf-common/src/counters.rs`
-- [ ] T063 [US3] 将所有 WatchGap 原因接入 OutputPipeline、累计计数和 10 秒内 degraded/unhealthy 状态转换，禁止输出空 perm/path 假事件于 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/health/state.rs`
-- [ ] T064 [US3] 输出新增计数、gap reason、rule_version 和故障阶段，保持状态/诊断单行且不含 argv 于 `crates/auditd-ebpf/src/output/status_formatter.rs`、`crates/auditd-ebpf/src/health/reporter.rs`
-- [ ] T065 [US3] 完成旧对象 flags=0、openat2 读取失败、FD stale、路径截断、RingBuf 满、queue 满和 EPIPE 的可重复注入于 `tests/failure-injection/watch_rules.sh`
+- [X] T062 [US3] 增加 watch candidate/match、r/w/x/a match、permission failure 和 FD failure 计数模型及序列化字段于 `crates/auditd-ebpf/src/health/counters.rs`、`crates/auditd-ebpf-common/src/counters.rs`
+- [X] T063 [US3] 将所有 WatchGap 原因接入 OutputPipeline、累计计数和 10 秒内 degraded/unhealthy 状态转换，禁止输出空 perm/path 假事件于 `crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf/src/health/state.rs`
+- [X] T064 [US3] 输出新增计数、gap reason、rule_version 和故障阶段，保持状态/诊断单行且不含 argv 于 `crates/auditd-ebpf/src/output/status_formatter.rs`、`crates/auditd-ebpf/src/health/reporter.rs`
+- [X] T065 [US3] 完成旧对象 flags=0、openat2 读取失败、FD stale、路径截断、RingBuf 满、queue 满和 EPIPE 的可重复注入于 `tests/failure-injection/watch_rules.sh`
 
 ### Performance Evidence
 
-- [ ] T066 [US3] 为确定性 path workload 记录目标路径、操作 ID、预期权限和完成结果 ledger 于 `crates/auditd-ebpf-bench/src/workloads/path.rs`、`crates/auditd-ebpf-bench/src/executor.rs`
-- [ ] T067 [US3] 编排同版本关闭 watch 与启用 `-w /tmp/ddtest -p rw -k ddtest` 的 capture-only/operational 预热、测量、冷却和恢复于 `crates/auditd-ebpf-bench/src/runner.rs`、`crates/auditd-ebpf-bench/src/runners/auditd_ebpf.rs`
-- [ ] T068 [US3] 强制至少 5 个有效样本、CPU/RSS/吞吐/p95/丢失字段和正确性失败即 invalid 的 watch 报告于 `crates/auditd-ebpf-bench/src/report.rs`、`crates/auditd-ebpf-bench/src/statistics.rs`、`crates/auditd-ebpf-bench/src/metrics.rs`
-- [ ] T069 [US3] 执行 `quickstart.md` 第 11–13 节、故障注入和隔离主机 watch 基准，将脱敏结论与原始结果位置记录于 `docs/watch-us3-validation.md`、`docs/watch-performance-validation.md`
-- [ ] T070 [US3] 运行 fmt、严格 Clippy、用户态/bench 测试、eBPF build、host kernel 和 failure injection 门禁，并更新结果于 `docs/watch-us3-validation.md`
+- [X] T066 [US3] 为确定性 path workload 记录目标路径、操作 ID、预期权限和完成结果 ledger 于 `crates/auditd-ebpf-bench/src/workloads/path.rs`、`crates/auditd-ebpf-bench/src/executor.rs`
+- [X] T067 [US3] 编排同版本关闭 watch 与启用 `-w /tmp/ddtest -p rw -k ddtest` 的 capture-only/operational 预热、测量、冷却和恢复于 `crates/auditd-ebpf-bench/src/runner.rs`、`crates/auditd-ebpf-bench/src/runners/auditd_ebpf.rs`
+- [X] T068 [US3] 强制至少 5 个有效样本、CPU/RSS/吞吐/p95/丢失字段和正确性失败即 invalid 的 watch 报告于 `crates/auditd-ebpf-bench/src/report.rs`、`crates/auditd-ebpf-bench/src/statistics.rs`、`crates/auditd-ebpf-bench/src/metrics.rs`
+- [X] T069 [US3] 执行 `quickstart.md` 第 11–13 节、故障注入和隔离主机 watch 基准，将脱敏结论与原始结果位置记录于 `docs/watch-us3-validation.md`、`docs/watch-performance-validation.md`
+- [X] T070 [US3] 运行 fmt、严格 Clippy、用户态/bench 测试、eBPF build、host kernel 和 failure injection 门禁，并更新结果于 `docs/watch-us3-validation.md`
 - [ ] T071 [US3] 在 T057–T070 全部通过后创建 `feat: expose watch gaps and performance evidence` 里程碑提交，提交范围为 `crates/auditd-ebpf/src/health/`、`crates/auditd-ebpf/src/output/`、`crates/auditd-ebpf/src/runtime.rs`、`crates/auditd-ebpf-bench/`、`tests/failure-injection/`、`docs/watch-us3-validation.md`、`docs/watch-performance-validation.md`
 
 **Checkpoint**: 没有静默权限或路径缺口，性能声明具备正确性前置和可复现证据。

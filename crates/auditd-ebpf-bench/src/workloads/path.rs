@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::model::{NormalizedEvent, WorkloadOperation};
+use crate::model::{NormalizedEvent, PathLedgerEntry, WorkloadOperation};
 
 const KINDS: [&str; 5] = ["absolute", "cwd", "dirfd", "rename", "unlink"];
 
@@ -30,6 +30,29 @@ pub fn generate(root: &Path, count: usize) -> Vec<WorkloadOperation> {
                     path: Some(path.to_string_lossy().into_owned()),
                 }],
             }
+        })
+        .collect()
+}
+
+/// 从确定性操作生成预期账本。完成状态必须在执行器确认 syscall 返回后再更新。
+pub fn ledger(operations: &[WorkloadOperation]) -> Vec<PathLedgerEntry> {
+    operations
+        .iter()
+        .flat_map(|operation| {
+            operation
+                .expected_events
+                .iter()
+                .map(|event| PathLedgerEntry {
+                    target_path: event.path.clone().unwrap_or_else(|| "?".into()),
+                    operation_id: operation.id.clone(),
+                    expected_permission: match event.syscall.as_str() {
+                        "openat" => "rw",
+                        "renameat2" | "unlinkat" => "w",
+                        _ => "?",
+                    }
+                    .into(),
+                    completed: false,
+                })
         })
         .collect()
 }
