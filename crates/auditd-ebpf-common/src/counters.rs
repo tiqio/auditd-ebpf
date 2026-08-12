@@ -5,6 +5,11 @@
 
 pub const COUNTER_RINGBUF_DROPPED: u32 = 0;
 pub const COUNTER_INFLIGHT_DROPPED: u32 = 1;
+/// 保留的入口/出口关联缺口 ABI 槽位。
+///
+/// raw `sys_exit` 会看到所有 syscall，而 `sys_enter` 会主动过滤绝大多数非候选调用，因此
+/// “出口没有 inflight entry”本身不是丢失，不能递增此槽。当前真实入口保存失败统一计入
+/// `COUNTER_INFLIGHT_DROPPED`；本槽保持兼容，直到未来有可证明的关联缺口检测信号。
 pub const COUNTER_CORRELATION_MISSED: u32 = 2;
 pub const COUNTER_EXEC_ARGV_CAPTURED: u32 = 3;
 pub const COUNTER_EXEC_ARGV_DROPPED: u32 = 4;

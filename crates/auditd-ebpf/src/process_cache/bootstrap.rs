@@ -92,6 +92,19 @@ pub fn read_thread(tgid: u32, tid: u32) -> anyhow::Result<BootstrapSnapshot> {
     })
 }
 
+/// 从事件进程自己的 mount namespace 视图读取单个 FD 的当前词法路径。
+///
+/// 该接口只用于处理 open/dup 事件与紧随其后的 fd-only syscall 跨 CPU 到达时的短暂竞态。
+/// 相比再次替换整个 `ProcessFileTable`，单条回读不会用较早的 `/proc` 快照覆盖已经处理过的
+/// close/dup 更新；读取失败仍由调用方产生明确 FD gap，绝不沿用未知关联。
+pub fn read_fd_path(tgid: u32, tid: u32, fd: i32) -> anyhow::Result<PathBuf> {
+    let proc_tid = PathBuf::from(format!("/proc/{tgid}/task/{tid}"));
+    let root_host = fs::read_link(proc_tid.join("root"))?;
+    let target = fs::read_link(proc_tid.join("fd").join(fd.to_string()))?;
+    anyhow::ensure!(target.is_absolute(), "FD 目标不是绝对路径");
+    Ok(namespace_path(&root_host, &target))
+}
+
 fn namespace_path(root: &Path, host_path: &Path) -> PathBuf {
     host_path
         .strip_prefix(root)

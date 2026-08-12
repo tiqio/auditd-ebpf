@@ -1,6 +1,6 @@
 use super::ProcessCache;
 
-pub fn on_mount_boundary_change(cache: &mut ProcessCache, syscall: &str, success: bool) {
+pub fn on_mount_boundary_change(cache: &mut ProcessCache, tid: u32, syscall: &str, success: bool) {
     if success
         && matches!(
             syscall,
@@ -14,6 +14,6 @@ pub fn on_mount_boundary_change(cache: &mut ProcessCache, syscall: &str, success
                 | "unshare"
         )
     {
-        cache.invalidate_mounts();
+        let _ = cache.invalidate_process_mounts(tid);
     }
 }

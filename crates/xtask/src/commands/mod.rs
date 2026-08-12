@@ -265,6 +265,15 @@ fn test_kernel(kernel: Option<&str>) -> anyhow::Result<()> {
             >= 1,
         "openat2 用户指针读取失败未增加 permission classification failure"
     );
+    anyhow::ensure!(
+        counters
+            .correlation_missed_per_cpu
+            .iter()
+            .copied()
+            .sum::<u64>()
+            == 0,
+        "正常候选过滤不得被误计为 syscall correlation loss"
+    );
 
     Command::new("/bin/true").status()?;
     let reloaded_rules = parse_rules(

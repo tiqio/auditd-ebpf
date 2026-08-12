@@ -18,11 +18,11 @@ use aya_ebpf::{
 };
 
 use crate::maps::{
-    ACTIVE_GENERATION, COUNTER_CORRELATION_MISSED, COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED,
-    COUNTER_INFLIGHT_DROPPED, COUNTER_INTERNAL_DROPPED, COUNTER_PERMISSION_CLASSIFICATION_FAILED,
-    COUNTER_RINGBUF_DROPPED, EVENT_COUNTERS, EVENTS, INFLIGHT_SYSCALLS, InflightSyscall,
-    MAINTENANCE_BITMAPS_B32, MAINTENANCE_BITMAPS_B64, PERMISSION_MASKS_B32, PERMISSION_MASKS_B64,
-    PROCESS_ABI, RULE_VERSIONS, SYSCALL_BITMAPS_B32, SYSCALL_BITMAPS_B64, SYSCALL_EVENT_SCRATCH,
+    ACTIVE_GENERATION, COUNTER_EVENTS_SEEN, COUNTER_EVENTS_SUBMITTED, COUNTER_INFLIGHT_DROPPED,
+    COUNTER_INTERNAL_DROPPED, COUNTER_PERMISSION_CLASSIFICATION_FAILED, COUNTER_RINGBUF_DROPPED,
+    EVENT_COUNTERS, EVENTS, INFLIGHT_SYSCALLS, InflightSyscall, MAINTENANCE_BITMAPS_B32,
+    MAINTENANCE_BITMAPS_B64, PERMISSION_MASKS_B32, PERMISSION_MASKS_B64, PROCESS_ABI,
+    RULE_VERSIONS, SYSCALL_BITMAPS_B32, SYSCALL_BITMAPS_B64, SYSCALL_EVENT_SCRATCH,
     SYSCALL_SCRATCH, WATCH_BASENAME_HASHES, WATCH_FDS, WATCH_PATH_COUNTS, WATCH_PATH_HASHES,
 };
 use crate::programs::exec::{argv_pointer_index, capture_attempt, emit_result, is_exec_syscall};
@@ -70,23 +70,6 @@ fn try_sys_enter(context: &RawTracePointContext) -> Result<u32, i32> {
     {
         return Ok(0);
     }
-    let event_flags = if requested_permissions == 0 {
-        0
-    } else {
-        match classify_permission(arch, syscall_nr, args[1], args[2], requested_permissions) {
-            Some(actual) if actual & requested_permissions != 0 => {
-                PERMISSION_VALID | u32::from(actual)
-            }
-            Some(_) if !maintenance_only => return Ok(0),
-            Some(_) => 0,
-            None => {
-                // 动态参数读取失败时绝不猜测权限。保留 flags=0 事件可让同时存在的普通
-                // syscall 规则继续工作，用户态 permission 规则必须把它记录为明确缺口。
-                increment_counter(COUNTER_PERMISSION_CLASSIFICATION_FAILED);
-                0
-            }
-        }
-    };
     let rule_version = RULE_VERSIONS.get(generation).copied().unwrap_or(0);
     let Some(scratch_pointer) = SYSCALL_SCRATCH.get_ptr_mut(0) else {
         increment_counter(COUNTER_INFLIGHT_DROPPED);
@@ -99,7 +82,7 @@ fn try_sys_enter(context: &RawTracePointContext) -> Result<u32, i32> {
     inflight.syscall_nr = syscall_nr;
     inflight.args = args;
     inflight.rule_version = rule_version;
-    inflight.event_flags = event_flags;
+    inflight.event_flags = 0;
     inflight.dirfd = path_dirfd(arch, syscall_nr, &args);
     inflight.path_flags = 0;
     inflight.path_len = 0;
@@ -120,6 +103,23 @@ fn try_sys_enter(context: &RawTracePointContext) -> Result<u32, i32> {
         } else if !watch_path_candidate(generation, inflight) {
             return Ok(0);
         }
+
+        // 动态 open 权限可能需要读取用户指针。必须在路径/FD 候选过滤之后执行，否则
+        // 全系统与 watch 路径无关的 openat2 失败都会污染 permission failure 健康计数。
+        inflight.event_flags =
+            match classify_permission(arch, syscall_nr, args[1], args[2], requested_permissions) {
+                Some(actual) if actual & requested_permissions != 0 => {
+                    PERMISSION_VALID | u32::from(actual)
+                }
+                Some(_) if !maintenance_only => return Ok(0),
+                Some(_) => 0,
+                None => {
+                    // 对真正可能命中 watch 的候选，读取失败时绝不猜测权限。保留 flags=0，
+                    // 用户态会拒绝伪审计事件并输出结构化 permission gap。
+                    increment_counter(COUNTER_PERMISSION_CLASSIFICATION_FAILED);
+                    0
+                }
+            };
     }
     // exec argv 体积远大于普通 syscall 事件，只能在路径候选过滤通过后采集；否则一条
     // `-p x` watch 会为全系统 exec 复制参数并淹没共享 RingBuf。
@@ -140,7 +140,9 @@ fn try_sys_enter(context: &RawTracePointContext) -> Result<u32, i32> {
 fn try_sys_exit(context: &RawTracePointContext) -> Result<u32, i32> {
     let pid_tgid = bpf_get_current_pid_tgid();
     let Some(inflight) = (unsafe { INFLIGHT_SYSCALLS.get(&pid_tgid) }) else {
-        increment_counter(COUNTER_CORRELATION_MISSED);
+        // sys_exit 会观察全系统调用，而 sys_enter 会主动过滤未命中 bitmap、权限、路径哈希
+        // 或 WATCH_FDS 的调用。这些正常过滤不会创建 inflight entry，因此缺少 entry 不能
+        // 解释为关联丢失。真正无法保存入口状态时，sys_enter 已增加 inflight_dropped。
         return Ok(0);
     };
     let return_value = context.arg::<i64>(1);
@@ -474,59 +476,78 @@ fn watch_path_candidate(generation: u32, inflight: &InflightSyscall) -> bool {
     if count == 0 {
         return true;
     }
-    // ftruncate/fchmod 等 fd-only 操作没有用户路径，必须交给用户态 FD 表关联。
+    // 只有 ftruncate/fchmod 等真正 fd-only 操作可以在没有路径参数时继续。openat2 等
+    // 路径型 syscall 若用户指针读取失败，既无法证明与 watch 路径相关，也不能把全系统
+    // 无效调用都记成 watch gap，因此在候选边界直接过滤。
     if inflight.path_len == 0 && inflight.path2_len == 0 {
-        return true;
+        let (primary, secondary) = path_argument_indexes(inflight.arch, inflight.syscall_nr);
+        return primary >= 6 && secondary >= 6;
     }
     let primary_absolute = inflight.path_len > 0 && inflight.path[0] == b'/';
     let secondary_absolute = inflight.path2_len > 0 && inflight.path2[0] == b'/';
-    let base = (generation & 1) * 16;
-    if !primary_absolute && !secondary_absolute {
-        let primary_suffix = path_suffix_hash(&inflight.path, inflight.path_len);
-        let secondary_suffix = path_suffix_hash(&inflight.path2, inflight.path2_len);
-        let mut index = 0;
-        while index < 16 {
-            if index >= count {
-                break;
-            }
-            let expected = WATCH_BASENAME_HASHES
-                .get(base + index)
-                .copied()
-                .unwrap_or(0);
-            if (inflight.path_len > 0 && primary_suffix == expected)
-                || (inflight.path2_len > 0 && secondary_suffix == expected)
-            {
-                return true;
-            }
-            index += 1;
+    // 把绝对路径和相对 basename 分到独立子程序，避免在同一 verifier 循环中组合四组
+    // 分支状态。混合双路径仍逐侧验证，但不会造成百万级状态爆炸。
+    if inflight.path_len > 0
+        && if primary_absolute {
+            absolute_watch_path_candidate(generation, &inflight.path, inflight.path_len, count)
+        } else {
+            relative_watch_path_candidate(generation, &inflight.path, inflight.path_len, count)
         }
-        return false;
-    }
-    // 双路径 syscall 若混合绝对与相对参数，相对一侧仍需 dirfd/cwd 解析；该少见形态
-    // 保守送往用户态，避免为了候选削减制造静默漏报。
-    if (primary_absolute && inflight.path2_len > 0 && !secondary_absolute)
-        || (secondary_absolute && inflight.path_len > 0 && !primary_absolute)
     {
         return true;
     }
-    // 显式初始化哈希寄存器，避免 verifier 将 Option 分支识别为“可能未写入”。
-    // absolute 布尔值仍保护比较，因此 0 只作为未计算时的占位值。
-    let mut primary_hash = 0_u64;
-    if primary_absolute {
-        primary_hash = path_hash(&inflight.path, inflight.path_len);
-    }
-    let mut secondary_hash = 0_u64;
-    if secondary_absolute {
-        secondary_hash = path_hash(&inflight.path2, inflight.path2_len);
-    }
+    inflight.path2_len > 0
+        && if secondary_absolute {
+            absolute_watch_path_candidate(generation, &inflight.path2, inflight.path2_len, count)
+        } else {
+            relative_watch_path_candidate(generation, &inflight.path2, inflight.path2_len, count)
+        }
+}
+
+#[inline(never)]
+fn absolute_watch_path_candidate(
+    generation: u32,
+    path: &[u8; MAX_PATH_ARG_BYTES],
+    length: u16,
+    count: u32,
+) -> bool {
+    let candidate = path_hash(path, length);
+    let base = (generation & 1) * 16;
     let mut index = 0;
     while index < 16 {
         if index >= count {
             break;
         }
-        let expected = WATCH_PATH_HASHES.get(base + index).copied().unwrap_or(0);
-        if (primary_absolute && primary_hash == expected)
-            || (secondary_absolute && secondary_hash == expected)
+        if WATCH_PATH_HASHES
+            .get(base + index)
+            .copied()
+            .is_some_and(|expected| candidate == expected)
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+#[inline(never)]
+fn relative_watch_path_candidate(
+    generation: u32,
+    path: &[u8; MAX_PATH_ARG_BYTES],
+    length: u16,
+    count: u32,
+) -> bool {
+    let candidate = path_suffix_hash(path, length);
+    let base = (generation & 1) * 16;
+    let mut index = 0;
+    while index < 16 {
+        if index >= count {
+            break;
+        }
+        if WATCH_BASENAME_HASHES
+            .get(base + index)
+            .copied()
+            .is_some_and(|expected| candidate == expected)
         {
             return true;
         }

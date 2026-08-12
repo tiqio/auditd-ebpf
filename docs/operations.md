@@ -6,6 +6,10 @@
 人员加入该组。unit 使用 `ProtectSystem=strict`，只允许写 `/var/lib/auditd-ebpf`，stdout 和
 stderr 都进入 journal。审计事件只写 stdout；status、diag 写 stderr，便于 rsyslog 独立分流。
 
+默认 systemd 单元从 `/etc/auditd-ebpf/rules.d` 读取本服务规则；不要与传统 auditd 的
+`/etc/audit/rules.d` 混用。单元声明 `Conflicts=auditd.service`，正式启用时由 systemd 停止
+传统 auditd，避免两个审计代理同时运行造成运维判断歧义。
+
 ```console
 systemctl enable --now auditd-ebpf.service
 journalctl -u auditd-ebpf.service -o cat

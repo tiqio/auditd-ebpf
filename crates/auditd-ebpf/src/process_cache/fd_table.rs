@@ -11,6 +11,14 @@ pub fn associate_open(
     mount_epoch: u64,
     sequence: u64,
 ) {
+    if table.state == FileTableState::Stale {
+        // exec 或挂载边界变化后的旧 FD 集合无法再证明可靠；但本次成功 open 的返回 fd
+        // 与已解析路径来自同一条 syscall 事件，可以作为新的可信起点。先丢弃全部旧关联，
+        // 再恢复表状态，避免 stale 表永久拒绝后续 dup/ftruncate 生命周期维护。
+        table.fds.clear();
+        table.state = FileTableState::Reliable;
+        table.refresh_failure = None;
+    }
     // 成功 open 复用已有 fd 时必须覆盖旧条目；保留旧路径会造成严重误报。
     table.fds.insert(
         fd,

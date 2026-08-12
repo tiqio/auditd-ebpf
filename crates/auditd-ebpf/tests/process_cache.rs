@@ -4,13 +4,71 @@ use auditd_ebpf::process_cache::{
 };
 
 #[test]
-fn mount_epoch_invalidates_thread_contexts() {
+fn mount_epoch_only_invalidates_the_triggering_process() {
     let mut cache = ProcessCache::default();
+    let changed = ProcessIdentity {
+        tgid: 1,
+        start_time: 10,
+    };
+    let unrelated = ProcessIdentity {
+        tgid: 2,
+        start_time: 20,
+    };
+    let namespace = MountNamespaceId {
+        device: 4,
+        inode: 5,
+    };
+    cache.insert_thread(changed, 1, "/", "/tmp", namespace);
     cache.insert_thread(
-        ProcessIdentity {
-            tgid: 1,
-            start_time: 10,
+        unrelated,
+        2,
+        "/",
+        "/var",
+        MountNamespaceId {
+            device: 6,
+            inode: 7,
         },
+    );
+    cache.open_fd(1, 3, "/tmp/changed").unwrap();
+    cache.open_fd(2, 4, "/var/unrelated").unwrap();
+
+    assert!(cache.is_thread_mount_current(1));
+    assert!(cache.is_thread_mount_current(2));
+    cache.invalidate_process_mounts(1).unwrap();
+
+    assert!(!cache.is_thread_mount_current(1));
+    assert!(cache.is_thread_mount_current(2));
+    assert!(cache.resolve_fd_path(1, 3).is_err());
+    assert_eq!(
+        cache.resolve_fd_path(2, 4).unwrap(),
+        std::path::Path::new("/var/unrelated")
+    );
+    assert_eq!(
+        cache
+            .file_table(changed)
+            .unwrap()
+            .refresh_failure
+            .as_deref(),
+        Some("mount_epoch_changed")
+    );
+    assert!(
+        cache
+            .file_table(unrelated)
+            .unwrap()
+            .refresh_failure
+            .is_none()
+    );
+}
+
+#[test]
+fn mount_invalidation_applies_to_the_shared_process_table() {
+    let mut cache = ProcessCache::default();
+    let process = ProcessIdentity {
+        tgid: 10,
+        start_time: 30,
+    };
+    cache.insert_thread(
+        process,
         1,
         "/",
         "/tmp",
@@ -19,9 +77,10 @@ fn mount_epoch_invalidates_thread_contexts() {
             inode: 5,
         },
     );
-    assert!(cache.thread(1).unwrap().is_current(cache.mount_epoch()));
-    cache.invalidate_mounts();
-    assert!(!cache.thread(1).unwrap().is_current(cache.mount_epoch()));
+    cache.fork_thread(1, process, 2).unwrap();
+    cache.invalidate_process_mounts(2).unwrap();
+    assert!(!cache.is_thread_mount_current(1));
+    assert!(!cache.is_thread_mount_current(2));
 }
 
 #[test]
@@ -126,6 +185,14 @@ fn exec_refresh_failure_marks_shared_table_stale() {
             .as_deref(),
         Some("exec_proc_refresh_failed")
     );
+
+    cache.open_fd(71, 5, "/work/after-exec").unwrap();
+    assert!(cache.resolve_fd_path(71, 4).is_err());
+    assert_eq!(
+        cache.resolve_fd_path(71, 5).unwrap(),
+        std::path::Path::new("/work/after-exec")
+    );
+    assert!(cache.file_table(process).unwrap().refresh_failure.is_none());
 }
 
 #[test]

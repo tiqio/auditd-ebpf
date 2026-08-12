@@ -32,6 +32,7 @@ pub enum CacheError {
 #[derive(Default)]
 pub struct ProcessCache {
     mount_epoch: u64,
+    process_mount_epochs: BTreeMap<ProcessIdentity, u64>,
     threads: BTreeMap<u32, ThreadPathContext>,
     file_tables: BTreeMap<ProcessIdentity, ProcessFileTable>,
 }
@@ -68,6 +69,10 @@ impl ProcessCache {
         mountinfo: impl Into<String>,
     ) {
         self.remove_reused_process(process);
+        let mount_epoch = *self
+            .process_mount_epochs
+            .entry(process)
+            .or_insert(self.mount_epoch);
         self.file_tables
             .entry(process)
             .or_insert_with(|| ProcessFileTable::empty(process));
@@ -78,7 +83,7 @@ impl ProcessCache {
                 tid,
                 root: Some(root.into()),
                 mount_namespace: Some(mount_namespace),
-                mount_epoch: self.mount_epoch,
+                mount_epoch,
                 cwd: Some(cwd.into()),
                 abi,
                 mountinfo: mountinfo.into(),
@@ -87,12 +92,16 @@ impl ProcessCache {
     }
 
     pub fn insert_context(&mut self, mut snapshot: BootstrapSnapshot) {
-        snapshot.thread.mount_epoch = self.mount_epoch;
-        for association in snapshot.file_table.fds.values_mut() {
-            association.mount_epoch = self.mount_epoch;
-        }
         let process = snapshot.thread.process;
         self.remove_reused_process(process);
+        let mount_epoch = *self
+            .process_mount_epochs
+            .entry(process)
+            .or_insert(self.mount_epoch);
+        snapshot.thread.mount_epoch = mount_epoch;
+        for association in snapshot.file_table.fds.values_mut() {
+            association.mount_epoch = mount_epoch;
+        }
         self.file_tables.insert(process, snapshot.file_table);
         self.threads.insert(snapshot.thread.tid, snapshot.thread);
     }
@@ -117,10 +126,13 @@ impl ProcessCache {
                 .ok_or(CacheError::StaleFileTable { tid: parent_tid })?;
             snapshot.process = child_process;
             self.file_tables.insert(child_process, snapshot);
+            let parent_epoch = self.process_mount_epoch(parent_process);
+            self.process_mount_epochs
+                .insert(child_process, parent_epoch);
         }
         child.process = child_process;
         child.tid = child_tid;
-        child.mount_epoch = self.mount_epoch;
+        child.mount_epoch = self.process_mount_epoch(child_process);
         self.threads.insert(child_tid, child);
         Ok(())
     }
@@ -149,6 +161,7 @@ impl ProcessCache {
             .any(|thread| thread.process == context.process)
         {
             self.file_tables.remove(&context.process);
+            self.process_mount_epochs.remove(&context.process);
         }
     }
 
@@ -159,13 +172,14 @@ impl ProcessCache {
         path: impl Into<PathBuf>,
     ) -> Result<(), CacheError> {
         let process = self.process_for_tid(tid)?;
+        let mount_epoch = self.process_mount_epoch(process);
         associate_open(
             self.file_tables
                 .get_mut(&process)
                 .ok_or(CacheError::StaleFileTable { tid })?,
             fd,
             path.into(),
-            self.mount_epoch,
+            mount_epoch,
             0,
         );
         Ok(())
@@ -217,7 +231,7 @@ impl ProcessCache {
         raw: &Path,
     ) -> Result<PathBuf, PathError> {
         let context = self.threads.get(&tid).ok_or(PathError::MissingThread)?;
-        if !context.is_current(self.mount_epoch) {
+        if !context.is_current(self.process_mount_epoch(context.process)) {
             return Err(PathError::StaleMountEpoch);
         }
         let root = context.root.as_deref().ok_or(PathError::MissingBase)?;
@@ -239,16 +253,26 @@ impl ProcessCache {
             })
     }
 
-    pub fn invalidate_mounts(&mut self) {
+    /// 仅失效触发挂载边界变化的进程，避免其他进程执行 mount/setns 等操作时
+    /// 清空全机 FD 路径关联。这里仍让同一线程组共享失效状态，因为 FD 表本来就是
+    /// 按 `ProcessIdentity` 维护的；随后由触发线程的 `/proc` 快照恢复该进程。
+    pub fn invalidate_process_mounts(&mut self, tid: u32) -> Result<(), CacheError> {
+        let process = self.process_for_tid(tid)?;
         self.mount_epoch = self.mount_epoch.wrapping_add(1);
-        for table in self.file_tables.values_mut() {
-            mark_stale(table, "mount_epoch_changed");
-        }
+        self.process_mount_epochs.insert(process, self.mount_epoch);
+        let table = self
+            .file_tables
+            .get_mut(&process)
+            .ok_or(CacheError::StaleFileTable { tid })?;
+        mark_stale(table, "mount_epoch_changed");
+        Ok(())
     }
 
     #[must_use]
-    pub const fn mount_epoch(&self) -> u64 {
-        self.mount_epoch
+    pub fn is_thread_mount_current(&self, tid: u32) -> bool {
+        self.threads
+            .get(&tid)
+            .is_some_and(|context| context.is_current(self.process_mount_epoch(context.process)))
     }
 
     #[must_use]
@@ -294,7 +318,7 @@ impl ProcessCache {
         }
         let association = table.fds.get(&fd).ok_or(PathError::MissingFdAssociation)?;
         if association.confidence != AssociationConfidence::Reliable
-            || association.mount_epoch != self.mount_epoch
+            || association.mount_epoch != self.process_mount_epoch(context.process)
         {
             return Err(PathError::StaleFdAssociation);
         }
@@ -310,7 +334,15 @@ impl ProcessCache {
             .collect();
         for identity in reused {
             self.file_tables.remove(&identity);
+            self.process_mount_epochs.remove(&identity);
             self.threads.retain(|_, thread| thread.process != identity);
         }
+    }
+
+    fn process_mount_epoch(&self, process: ProcessIdentity) -> u64 {
+        self.process_mount_epochs
+            .get(&process)
+            .copied()
+            .unwrap_or(self.mount_epoch)
     }
 }

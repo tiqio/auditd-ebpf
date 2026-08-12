@@ -1376,18 +1376,34 @@ fn resolve_syscall_paths(
     if requests.is_empty() && is_fd_only_path_syscall(syscall) {
         let fd = event.args[0] as i32;
         let resolve = |cache: &ProcessCache| cache.resolve_fd_path(tid, fd);
-        if let Ok(path) = resolve(cache) {
-            return Ok(vec![path]);
-        }
-        if let Ok(snapshot) = bootstrap::read_thread(tgid, tid) {
-            cache.insert_context(snapshot);
-            if let Ok(path) = resolve(cache) {
+        let cache_error = match resolve(cache) {
+            Ok(path) => return Ok(vec![path]),
+            Err(error) => error,
+        };
+        let refresh_error = match bootstrap::read_thread(tgid, tid) {
+            Ok(snapshot) => {
+                cache.insert_context(snapshot);
+                match resolve(cache) {
+                    Ok(path) => return Ok(vec![path]),
+                    Err(error) => error.to_string(),
+                }
+            }
+            Err(error) => error.to_string(),
+        };
+        // RingBuf 跨 CPU 到达顺序不保证 open/dup 维护事件一定先于紧随其后的 ftruncate。
+        // 全量 `/proc` 扫描也可能恰好落在 duplicate 创建之前；最后按事件进程视图回读
+        // 单个 FD，并只写回这一条关联，避免用竞态快照替换整个共享 FD 表。服务降权后
+        // 该读取可能被 procfs 权限拒绝，因此它只是竞态兜底，不能替代正确的缓存生命周期。
+        let proc_error = match bootstrap::read_fd_path(tgid, tid, fd) {
+            Ok(path) => {
+                let _ = cache.open_fd(tid, fd, path.clone());
                 return Ok(vec![path]);
             }
-        }
+            Err(error) => error.to_string(),
+        };
         if engine.requires_resolved_path(arch, syscall) {
             return Err(format!(
-                "fd_association_missing:tgid={tgid}:tid={tid}:syscall={syscall}:fd={fd}"
+                "fd_association_missing:tgid={tgid}:tid={tid}:syscall={syscall}:fd={fd}:cache={cache_error}:refresh={refresh_error}:proc={proc_error}"
             ));
         }
         return Ok(Vec::new());
@@ -1546,13 +1562,11 @@ fn apply_syscall_cache_updates(
 
     if event.path_flags & auditd_ebpf_common::event::PATH_FLAG_MOUNT_BOUNDARY_CHANGED != 0 {
         // 内核位是最终兜底，避免 syscall 名表遗漏新旧 ABI 的边界变更调用。
-        cache.invalidate_mounts();
+        let _ = cache.invalidate_process_mounts(tid);
     } else {
-        on_mount_boundary_change(cache, syscall, success);
+        on_mount_boundary_change(cache, tid, syscall, success);
     }
-    if cache
-        .thread(tid)
-        .is_some_and(|context| !context.is_current(cache.mount_epoch()))
+    if !cache.is_thread_mount_current(tid)
         && let Ok(context) = bootstrap::read_thread(tgid, tid)
     {
         cache.insert_context(context);

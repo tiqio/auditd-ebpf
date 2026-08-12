@@ -190,3 +190,14 @@ if grep -q 'key="ddtest".*path="'"${other_file}"'"' "${stdout_file}"; then
   echo "无关路径或 fd 复用产生误报" >&2
   exit 1
 fi
+
+# 无故障 workload 中正常被内核候选过滤的 syscall 不得被误计为 correlation loss。
+final_status=$(grep 'type=AUDITD_EBPF_STATUS .*final=yes' "${stderr_file}" | tail -1)
+[[ ${final_status} == *'correlation_lost=0'* ]]
+[[ ${final_status} == *'ring_lost=0'* ]]
+[[ ${final_status} == *'queue_lost=0'* ]]
+[[ ${final_status} == *'path_lost=0'* ]]
+[[ ${final_status} == *'watch_permission_failures=0'* ]]
+[[ ${final_status} == *'watch_fd_failures=0'* ]]
+[[ ${final_status} == *'stdout_failed=0'* ]]
+[[ ${final_status} == *'gaps_generated=0'* ]]
